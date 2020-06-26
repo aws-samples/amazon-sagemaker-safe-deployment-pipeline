@@ -67,7 +67,7 @@ Parameters:
     Description: Your GitHub username
     Type: String
   GitHubRepo:
-    Default: sagemaker-safe-deployment-pipeline
+    Default: amazon-sagemaker-safe-deployment-pipeline
     Type: String
     Description: Name of the GitHub repository
   GitHubBranch:
