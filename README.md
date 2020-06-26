@@ -161,10 +161,6 @@ First delete the stacks used as part of the pipeline for deployment, training jo
 
 Then delete the stack you created. 
 
-## Opening Issues
-
-If you encounter a bug with this project we would like to hear about it. Search the [existing issues](https://github.com/aws-samples/sagemaker-safe-deployment-pipeline/issues) and try to make sure your problem doesn’t already exist before opening a new issue. It’s helpful if you include the version of the python you’re using. Please include a stack trace and reduced repro case when appropriate, too.
-
 ## Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
