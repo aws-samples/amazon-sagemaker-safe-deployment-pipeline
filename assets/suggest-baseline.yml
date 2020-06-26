@@ -1,0 +1,35 @@
+Description: Suggest baseline for training job
+Parameters:
+  ModelName:
+    Type: String
+    Description: Name of the model
+  TrainJobId:
+    Type: String
+    Description: Id of the Codepipeline + SagemakerJobs
+  MLOpsRoleArn:
+    Type: String
+    Description: The role for executing the monitoring schedule
+  BaselineInputUri:
+    Type: String
+    Description: The s3 uri for baseline input
+  KmsKeyId:
+    Description: AWS KMS key ID used to encrypt data at rest for S3 results.
+    Type: String
+
+Resources:
+  SagemakerSuggestBaseline:
+    Type: Custom::SuggestBaseline
+    Properties:
+      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sagemaker-cfn-suggest-baseline
+      ProcessingJobName: !Sub mlops-${ModelName}-pbl-${TrainJobId}
+      BaselineInputUri: !Ref BaselineInputUri
+      BaselineResultsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}
+      KmsKeyId: !Ref KmsKeyId
+      PassRoleArn: !Ref MLOpsRoleArn
+      ExperimentName: !Ref ModelName
+      TrialName: !Ref TrainJobId
+
+Outputs:
+  ProcessingJobName:
+    Description: "The name of the baseline processing job"
+    Value: !GetAtt SagemakerSuggestBaseline.ProcessingJobName

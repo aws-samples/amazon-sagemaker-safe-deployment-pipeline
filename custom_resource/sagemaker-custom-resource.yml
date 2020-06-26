@@ -1,0 +1,101 @@
+Description: Template for sagemaker cloud formation custom resources
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  EnableDataCaptureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: sagemaker-cfn-enable-data-capture
+      CodeUri: .
+      Handler: sagemaker_data_capture.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt SagemakerCustomResourceRole.Arn
+      Description: "Enables data capture on a given SageMaker Endpoint"
+
+  SuggestBaselineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: sagemaker-cfn-suggest-baseline
+      CodeUri: .
+      Handler: sagemaker_suggest_baseline.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt SagemakerCustomResourceRole.Arn
+      Description: "Creates a SageMaker Monitoring Baseline for a given input"
+
+  MonitoringScheduleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: sagemaker-cfn-monitoring-schedule
+      CodeUri: .
+      Handler: sagemaker_monitoring_schedule.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt SagemakerCustomResourceRole.Arn
+      Description: "Creates a SageMaker Monitoring Schedule for a given Endpoint"
+
+  TrainingJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: sagemaker-cfn-training-job
+      CodeUri: .
+      Handler: sagemaker_training_job.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt SagemakerCustomResourceRole.Arn
+      Description: "Creates a SageMaker Training Job for a given request"
+
+  SagemakerCustomResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sagemaker-cfn-custom-resource
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Sid: AllowSageMaker
+                Effect: Allow
+                Action:
+                  - sagemaker:CreateTrainingJob
+                  - sagemaker:DescribeTrainingJob
+                  - sagemaker:StopTrainingJob
+                  - sagemaker:DescribeEndpoint
+                  - sagemaker:UpdateEndpoint
+                  - sagemaker:CreateEndpointConfig
+                  - sagemaker:DescribeEndpointConfig
+                  - sagemaker:DeleteEndpointConfig
+                  - sagemaker:CreateMonitoringSchedule
+                  - sagemaker:ListMonitoringExecutions
+                  - sagemaker:DeleteMonitoringSchedule
+                  - sagemaker:DescribeMonitoringSchedule
+                  - sagemaker:DescribeProcessingJob
+                  - sagemaker:CreateProcessingJob
+                  - sagemaker:StopProcessingJob
+                  - kms:CreateGrant # Required if KmsKeyId specified
+                Resource: "*"
+              - Sid: AllowLambda
+                Effect: Allow
+                Action:
+                  - lambda:* # Requires at least lambda:AddPermission
+                Resource: "*" # TODO: Narrow this down
+              - Sid: AllowEvents
+                Effect: Allow
+                Action:
+                  - events:* # Requires at least events:PutRule/events:RemoveTargets
+                Resource: "*" # TODO: Narrow this down
+              - Sid: AllowPassRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: sagemaker.amazonaws.com
+            Version: "2012-10-17"
+          PolicyName: SagemakerCustomResource

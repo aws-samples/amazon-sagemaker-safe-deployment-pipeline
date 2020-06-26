@@ -1,0 +1,316 @@
+Transform: AWS::Serverless-2016-10-31
+Description: Deploy a model at Sagemaker
+Parameters:
+  ImageRepoUri:
+    Type: String
+    Description: Uri of the docker (ECR) model image
+  ModelName:
+    Type: String
+    Description: Name of the model
+  TrainJobId:
+    Type: String
+    Description: Id of the Codepipeline + SagemakerJobs
+  MLOpsRoleArn:
+    Type: String
+    Description: The role for executing the deployment
+  VariantName:
+    Type: String
+    Description: Name of the endpoint variant
+  ScheduleMetricName:
+    Type: String
+    Description: The metric to alarm on for schedule
+  ScheduleMetricThreshold:
+    Type: Number
+    Description: The metric alarm threshold
+  KmsKeyId:
+    Description: AWS KMS key ID used to encrypt data at rest on the ML storage volume attached to endpoint config and S3 data capture.
+    Type: String
+
+Resources:
+  Model:
+    Type: "AWS::SageMaker::Model"
+    Properties:
+      ModelName: !Sub mlops-${ModelName}-prd-${TrainJobId}
+      PrimaryContainer:
+        Image: !Ref ImageRepoUri
+        ModelDataUrl: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/mlops-${ModelName}-${TrainJobId}/output/model.tar.gz
+      ExecutionRoleArn: !Ref MLOpsRoleArn
+
+  EndpointConfig:
+    Type: "AWS::SageMaker::EndpointConfig"
+    Properties:
+      ProductionVariants:
+        - InitialInstanceCount: 2
+          InitialVariantWeight: 1.0
+          InstanceType: ml.m5.large
+          ModelName: !GetAtt Model.ModelName
+          VariantName: !Ref VariantName
+      EndpointConfigName: !Sub mlops-${ModelName}-pec-${TrainJobId}
+      KmsKeyId: !Ref KmsKeyId
+      Tags:
+        - Key: Name
+          Value: !Sub mlops-${ModelName}-pec-${TrainJobId}
+
+  Endpoint:
+    Type: "AWS::SageMaker::Endpoint"
+    Properties:
+      EndpointName: !Sub mlops-${ModelName}-prd-${TrainJobId}
+      EndpointConfigName: !GetAtt EndpointConfig.EndpointConfigName
+      Tags:
+        - Key: Name
+          Value: !Sub mlops-${ModelName}-prd-${TrainJobId}
+    DependsOn: EndpointConfig
+
+  SagemakerDataCapture:
+    Type: Custom::EnableDataCapture
+    Properties:
+      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sagemaker-cfn-enable-data-capture"
+      EndpointName: !GetAtt Endpoint.EndpointName
+      VariantName: !Ref VariantName
+      EndpointConfigName: !Sub mlops-${ModelName}-pdc-${TrainJobId}
+      DataCaptureUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/datacapture
+      KmsKeyId: !Ref KmsKeyId
+    DependsOn: Endpoint
+
+  DeploymentCompleteTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${AWS::StackName}-deployment
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub mlops-${ModelName}-api
+      CodeUri: ../api
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt ApiFunctionRole.Arn
+      AutoPublishAlias: "live"
+      #AutoPublishCodeSha256: !Ref TrainSha256
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes #AllAtOnce
+        Alarms:
+          # A list of alarms that you want to monitor
+          - !Ref AliasErrorMetricGreaterThanZeroAlarm
+          - !Ref LatestVersionErrorMetricGreaterThanZeroAlarm
+        Hooks:
+          # Validation Lambda functions that are run before and after traffic shifting
+          PreTraffic: !Ref PreTrafficLambdaFunction
+          PostTraffic: !Ref PostTrafficLambdaFunction
+        TriggerConfigurations:
+          - TriggerEvents:
+              - DeploymentSuccess
+              - DeploymentFailure
+            TriggerName: DeploymentCompleteTrigger
+            TriggerTargetArn: !Ref DeploymentCompleteTopic
+      Environment:
+        Variables:
+          ENDPOINT_NAME: !GetAtt Endpoint.EndpointName
+      Events:
+        Invoke:
+          Type: Api
+          Properties:
+            Path: /api
+            Method: post
+    DependsOn: SagemakerDataCapture
+    Description: "Api deployment that invokes SagemMaker endpoint"
+
+  ApiFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Sid: AllowSageMaker
+                Effect: Allow
+                Action:
+                  - sagemaker:InvokeEndpoint
+                Resource: "arn:aws:sagemaker:*:*:endpoint/mlops-*"
+            Version: "2012-10-17"
+          PolicyName: SageMakerInvokeEndpoint
+
+  PreTrafficLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "CodeDeployHook_mlops-${ModelName}-PreTrafficLambdaFunction"
+      CodeUri: ../api
+      Handler: pre_traffic_hook.lambda_handler
+      Runtime: python3.7
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: AllowSageMaker
+              Effect: Allow
+              Action:
+                - sagemaker:DescribeEndpoint
+                - sagemaker:DescribeEndpointConfig
+                - sagemaker:InvokeEndpoint
+              Resource:
+                - "arn:aws:sagemaker:*:*:*/mlops-*"
+            - Sid: AllowCodeDeploy
+              Effect: Allow
+              Action:
+                - codedeploy:PutLifecycleEventHookExecutionStatus
+              Resource: !Sub "arn:${AWS::Partition}:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ServerlessDeploymentApplication}/*"
+      DeploymentPreference:
+        Enabled: False
+      Environment:
+        Variables:
+          ENDPOINT_NAME: !GetAtt Endpoint.EndpointName
+      Description: "Perform checks pre-shifting traffic to lambda"
+
+  PostTrafficLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "CodeDeployHook_mlops-${ModelName}-PostTrafficLambdaFunction"
+      CodeUri: ../api
+      Handler: post_traffic_hook.lambda_handler
+      Runtime: python3.7
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: AllowS3List
+              Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource: !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}
+            - Sid: AllowS3Get
+              Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}/*
+            - Sid: AllowCodeDeploy
+              Effect: Allow
+              Action:
+                - codedeploy:PutLifecycleEventHookExecutionStatus
+              Resource: !Sub "arn:${AWS::Partition}:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ServerlessDeploymentApplication}/*"
+      DeploymentPreference:
+        Enabled: False
+      Environment:
+        Variables:
+          ENDPOINT_NAME: !GetAtt Endpoint.EndpointName
+          DATA_CAPTURE_URI: !GetAtt SagemakerDataCapture.DataCaptureEndpointUri
+      Description: "Perform checks post-shifting traffic to lambda"
+
+  SagemakerMonitoringSchedule:
+    Type: Custom::MonitoringSchedule
+    Properties:
+      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sagemaker-cfn-monitoring-schedule"
+      EndpointName: !GetAtt Endpoint.EndpointName
+      ScheduleName: !Sub mlops-${ModelName}-pms-${TrainJobId}
+      BaselineConstraintsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/constraints.json
+      BaselineStatisticsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/statistics.json
+      OutputS3URI: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/reports
+      PassRoleArn: !Ref MLOpsRoleArn
+    DependsOn: SagemakerDataCapture # Wait until endpoint is update for data capture
+
+  SagemakerScheduleAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub mlops-${ModelName}-metric-gt-threshold
+      AlarmDescription: Schedule Metric > Threshold
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Endpoint
+          Value: !GetAtt Endpoint.EndpointName
+        - Name: MonitoringSchedule
+          Value: !GetAtt SagemakerMonitoringSchedule.ScheduleName
+      EvaluationPeriods: 2
+      MetricName: !Ref ScheduleMetricName
+      Namespace: aws/sagemaker/Endpoints/data-metrics
+      Period: 60
+      Statistic: Sum
+      Threshold: !Ref ScheduleMetricThreshold
+
+  AliasErrorMetricGreaterThanZeroAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub mlops-${ModelName}-alias-gt-zero
+      AlarmDescription: Lambda Function Error > 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Resource
+          Value: !Sub "${ApiFunction}:live"
+        - Name: FunctionName
+          Value: !Ref ApiFunction
+      EvaluationPeriods: 2
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: 0
+
+  LatestVersionErrorMetricGreaterThanZeroAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: !Sub mlops-${ModelName}-version-gt-zero
+      AlarmDescription: Lambda Function Error > 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Resource
+          Value: !Sub "${ApiFunction}:live"
+        - Name: FunctionName
+          Value: !Ref ApiFunction
+        - Name: ExecutedVersion
+          Value: !GetAtt ApiFunction.Version.Version
+      EvaluationPeriods: 2
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: 0
+
+  AutoScaling:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 10
+      MinCapacity: 2
+      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${VariantName}
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+      ScalableDimension: sagemaker:variant:DesiredInstanceCount
+      ServiceNamespace: sagemaker
+    DependsOn: SagemakerDataCapture
+
+  AutoScalingPolicy:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: SageMakerVariantInvocationsPerInstance
+      PolicyType: TargetTrackingScaling
+      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${VariantName}
+      ScalableDimension: sagemaker:variant:DesiredInstanceCount
+      ServiceNamespace: sagemaker
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 750.0
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification:
+          PredefinedMetricType: SageMakerVariantInvocationsPerInstance
+    DependsOn: AutoScaling
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  DeploymentApplication:
+    Description: "Regression deployment application"
+    Value: !Ref ServerlessDeploymentApplication
+  RestApi:
+    Description: "API Gateway endpoint URL for Prod stage for Regression function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/api/"
+  DataCaptureEndpointUri:
+    Description: "The base uri for data capture logs"
+    Value: !GetAtt SagemakerDataCapture.DataCaptureEndpointUri
+  ScheduleName:
+    Description: "The name of the monitoring schedule"
+    Value: !GetAtt SagemakerMonitoringSchedule.ScheduleName

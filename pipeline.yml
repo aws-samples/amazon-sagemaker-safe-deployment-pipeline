@@ -1,0 +1,548 @@
+# Delete the stack:
+#
+# aws cloudformation delete-stack --stack-name sagemaker-safe-deployment
+#
+# Create the stack:
+#
+# aws cloudformation create-stack --stack-name sagemaker-safe-deployment \
+#   --template-body file://pipeline.yml \
+#   --capabilities CAPABILITY_IAM \
+#   --parameters \
+#       ParameterKey=GitHubUser,ParameterValue=<GitHub Username> \
+#       ParameterKey=GitHubToken,ParameterValue=<GitHub Token> \
+#       ParameterKey=ModelName,ParameterValue=<Model Name>
+
+Description: Create a CodePipeline for a Machine Learning Model
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Required Parameters
+        Parameters:
+          - ModelName
+          - NotebookInstanceType
+      - Label:
+          default: Optional GitHub Parameters
+        Parameters:
+          - GitHubRepo
+          - GitHubBranch
+          - GitHubUser
+          - GitHubToken
+    ParameterLabels:
+      ModelName:
+        default: Model Name
+      NotebookInstanceType:
+        default: Notebook Instance Type
+      GitHubRepo:
+        default: GitHub Repository
+      GitHubBranch:
+        default: GitHub Branch
+      GitHubUser:
+        default: GitHub Username
+      GitHubToken:
+        default: GitHub Access Token
+
+Parameters:
+  ModelName:
+    Default: nyctaxi
+    Type: String
+    Description: Name of the model
+    MinLength: 1
+    MaxLength: 15 # Limited to this due to mlops-{model}-{dev/prd}-{pipeline-executionid}
+    AllowedPattern: ^[a-zA-Z0-9](-*[a-zA-Z0-9])*
+  NotebookInstanceType:
+    Type: String
+    Default: ml.t3.medium
+    Description: Select Instance type for the SageMaker Notebook
+    AllowedValues:
+      - ml.t3.medium
+      - ml.t3.large
+      - ml.t3.2xlarge
+      - ml.m5.large
+      - ml.m5.xlarge
+      - ml.m5.2xlarge
+    ConstraintDescription: Must select a valid notebook instance type.
+  GitHubUser:
+    Default: aws-samples
+    Description: Your GitHub username
+    Type: String
+  GitHubRepo:
+    Default: sagemaker-safe-deployment-pipeline
+    Type: String
+    Description: Name of the GitHub repository
+  GitHubBranch:
+    Default: master
+    Type: String
+    Description: Name of the branch the code is located
+  GitHubToken:
+    NoEcho: true
+    Description: Github OAuthToken with access to Repo. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af. Go to https://github.com/settings/tokens
+    Type: String
+
+Conditions:
+  GitHubTokenEmpty: !Equals [!Ref GitHubToken, ""]
+
+Resources:
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub KMS Key for mlops pipeline ${ModelName}
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: !Ref AWS::StackName
+        Statement:
+          - Sid: Allows admin of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - "kms:*"
+            Resource: "*"
+
+  KMSAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/mlops-${ModelName}
+      TargetKeyId: !Ref KMSKey
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub mlops-${ModelName}-artifact-${AWS::Region}-${AWS::AccountId}
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+
+  GitHubSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: !Sub GitHub Secret for ${GitHubRepo}
+      KmsKeyId: !Ref KMSKey
+      SecretString: !Sub '{"username":"${GitHubUser}","password":"${GitHubToken}"}'
+
+  CodeCommitRepository:
+    Type: AWS::CodeCommit::Repository
+    Condition: GitHubTokenEmpty
+    Properties:
+      RepositoryName: !Ref GitHubRepo
+      RepositoryDescription: !Sub SageMaker safe deployment pipeline for ${ModelName}
+
+  SageMakerCodeRepository:
+    Type: AWS::SageMaker::CodeRepository
+    Properties:
+      CodeRepositoryName: !Ref GitHubRepo
+      GitConfig:
+        RepositoryUrl:
+          Fn::If:
+            - GitHubTokenEmpty
+            - !GetAtt CodeCommitRepository.CloneUrlHttp
+            - !Sub https://github.com/${GitHubUser}/${GitHubRepo}.git
+        Branch: !Ref GitHubBranch
+        SecretArn:
+          Fn::If:
+            - GitHubTokenEmpty
+            - !Ref "AWS::NoValue"
+            - !Ref GitHubSecret
+
+  NotebookInstanceLifecycleConfig:
+    Type: AWS::SageMaker::NotebookInstanceLifecycleConfig
+    Properties:
+      NotebookInstanceLifecycleConfigName: !Sub ${ModelName}-lifecycle-config
+      OnCreate:
+        - Content:
+            Fn::If:
+              - GitHubTokenEmpty
+              - Fn::Base64:
+                  Fn::Sub: |
+                    #!/bin/bash
+                    # Clone the public github repo, and push it to a local codecommit branch
+                    export HOME=/root/
+                    echo "Configuring github for AWS credentials"
+                    git config --global credential.helper '!aws codecommit credential-helper $@'
+                    git config --global credential.UseHttpPath true
+                    cp /root/.gitconfig /home/ec2-user/ && chown ec2-user:ec2-user /home/ec2-user/.gitconfig
+                    echo "Clone the public repo and push it to codecommit repo"
+                    git clone -b ${GitHubBranch} "https://github.com/${GitHubUser}/${GitHubRepo}.git" /tmp/mlops-repo
+                    cd /tmp/mlops-repo
+                    git remote add codecommit ${CodeCommitRepository.CloneUrlHttp}
+                    git push --set-upstream codecommit ${GitHubBranch}
+              - Ref: AWS::NoValue
+      OnStart:
+        - Content:
+            Fn::Base64:
+              Fn::Sub: |
+                #!/bin/bash
+                touch /etc/profile.d/jupyter-env.sh
+                echo "export ARTIFACT_BUCKET=${ArtifactBucket}" >> /etc/profile.d/jupyter-env.sh
+                echo "export PIPELINE_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
+                echo "export MODEL_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
+
+  NotebookInstance:
+    Type: AWS::SageMaker::NotebookInstance
+    Properties:
+      NotebookInstanceName: !Sub ${ModelName}-notebook
+      InstanceType: !Ref NotebookInstanceType
+      LifecycleConfigName: !GetAtt NotebookInstanceLifecycleConfig.NotebookInstanceLifecycleConfigName
+      DefaultCodeRepository: !GetAtt SageMakerCodeRepository.CodeRepositoryName
+      KmsKeyId: !Ref KMSKey
+      RoleArn: !GetAtt SageMakerRole.Arn
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${ModelName}-build
+      Description: Builds the assets required for executing the rest of pipeline
+      ServiceRole: !GetAtt SageMakerRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: model/buildspec.yml
+      TimeoutInMinutes: 30
+
+  CreateExperiment:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub ${ModelName}-create-experiment
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt SageMakerRole.Arn
+      Runtime: python3.6
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import io
+          import zipfile
+          import json
+
+          s3 = boto3.client('s3')
+          sm = boto3.client('sagemaker')
+          codepipeline = boto3.client('codepipeline')
+
+          def lambda_handler(event, context):
+              print('event', json.dumps(event))
+              jobId = event["CodePipeline.job"]["id"]
+              experiment = None
+              trial = None
+
+              try:
+                  for inputArtifacts in event["CodePipeline.job"]["data"]["inputArtifacts"]:
+                      if inputArtifacts['name'] == 'BuildOutput':
+                          s3Location = inputArtifacts['location']['s3Location']
+                          zip_bytes = s3.get_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'])['Body'].read()
+                          with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
+                            experiment = json.loads(z.read('experiment.json').decode('utf-8'))
+                            trial = json.loads(z.read('trial.json').decode('utf-8'))
+
+                  if experiment is None or trial is None:
+                    raise(Exception("Experiment and Trail config not found"))
+
+                  try:
+                      response = sm.create_experiment(**experiment)
+                      print('created exp', response)
+                  except Exception as e:
+                      print('error creating exp', e)
+                  try:
+                      response = sm.create_trial(**trial)
+                      print('created trial', response)
+                  except Exception as e:
+                      print('error creating trial', e)
+
+                  # and update codepipeline
+                  codepipeline.put_job_success_result(jobId=jobId)
+              except Exception as e:
+                  print(e)
+                  resp = codepipeline.put_job_failure_result(
+                      jobId=jobId,
+                      failureDetails={
+                          'type': 'ConfigurationError',
+                          'message': str(e),
+                          'externalExecutionId': context.aws_request_id
+                      }
+                  )
+              return 'Done'
+
+      Description: "Function that creates an experiment and trial"
+
+  DeployPipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      Name: !Sub ${ModelName}
+      RoleArn: !GetAtt MLOpsRole.Arn
+      ArtifactStore:
+        Type: S3
+        EncryptionKey:
+          Id: !Ref KMSKey
+          Type: KMS
+        Location:
+          Ref: ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Fn::If:
+                - GitHubTokenEmpty
+                - Name: GitSource
+                  ActionTypeId:
+                    Category: Source
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CodeCommit
+                  Configuration:
+                    RepositoryName: !Ref GitHubRepo
+                    BranchName: !Ref GitHubBranch
+                  OutputArtifacts:
+                    - Name: ModelSourceOutput
+                - Name: GitSource
+                  ActionTypeId:
+                    Category: Source
+                    Owner: ThirdParty
+                    Version: "1"
+                    Provider: GitHub
+                  OutputArtifacts:
+                    - Name: ModelSourceOutput
+                  Configuration:
+                    Owner: !Ref GitHubUser
+                    Repo: !Ref GitHubRepo
+                    Branch: !Ref GitHubBranch
+                    OAuthToken: !Ref GitHubToken
+            - Name: DataSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: S3
+              OutputArtifacts:
+                - Name: DataSourceOutput
+              Configuration:
+                S3Bucket: !Ref ArtifactBucket
+                S3ObjectKey: !Sub ${ModelName}/data-source.zip
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: PackageModel
+              InputArtifacts:
+                - Name: ModelSourceOutput
+                - Name: DataSourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref BuildProject
+                PrimarySource: ModelSourceOutput
+                EnvironmentVariables: !Sub '[{"name":"DATA_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"ROLE_ARN","value":"${MLOpsRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"}]'
+              RunOrder: 1
+            - Name: SetupTraining
+              InputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !GetAtt MLOpsRole.Arn
+                Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+                StackName: sagemaker-custom-resource # Use global name to re-use across templates
+                TemplatePath: BuildOutput::template-custom-resource.yml
+              RunOrder: 2
+        - Name: Train
+          Actions:
+            - Name: CreateExperiment
+              InputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Version: "1"
+                Provider: Lambda
+              Configuration:
+                FunctionName: !Ref CreateExperiment
+                UserParameters: !Sub mlops-pipeline-${ModelName}
+              RunOrder: 1
+            - Name: TrainModel
+              InputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !GetAtt MLOpsRole.Arn
+                StackName: !Sub ${ModelName}-training-job
+                TemplateConfiguration: BuildOutput::training-job.json
+                TemplatePath: BuildOutput::training-job.yml
+              RunOrder: 2
+            - Name: SuggestBaseline
+              InputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !GetAtt MLOpsRole.Arn
+                StackName: !Sub ${ModelName}-suggest-baseline
+                TemplateConfiguration: BuildOutput::suggest-baseline.json
+                TemplatePath: BuildOutput::suggest-baseline.yml
+              RunOrder: 2
+        - Name: DeployDev
+          Actions:
+            - Name: DeployModelDev
+              InputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !GetAtt MLOpsRole.Arn
+                StackName: !Sub ${ModelName}-deploy-dev
+                TemplateConfiguration: BuildOutput::deploy-model-dev.json
+                TemplatePath: BuildOutput::deploy-model-dev.yml
+              RunOrder: 1
+            - Name: ApproveDeploy
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: "1"
+                Provider: Manual
+              Configuration:
+                ExternalEntityLink: !Sub https://${ModelName}-notebook.notebook.${AWS::Region}.sagemaker.aws/notebooks/sagemaker-safe-deployment-pipeline/notebook/mlops.ipynb
+                CustomData: "Shall this model be put into production?"
+              RunOrder: 2
+        - Name: DeployPrd
+          Actions:
+            - Name: DeployModelPrd
+              InputArtifacts:
+                - Name: BuildOutput
+              OutputArtifacts:
+                - Name: ModelDeployPrdOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                RoleArn: !GetAtt MLOpsRole.Arn
+                Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
+                StackName: !Sub ${ModelName}-deploy-prd
+                TemplateConfiguration: BuildOutput::template-model-prd.json
+                TemplatePath: BuildOutput::template-model-prd.yml
+              RunOrder: 1
+
+  SageMakerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "sagemaker.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "codebuild.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws:iam::aws:policy/IAMReadOnlyAccess"
+      Policies:
+        - PolicyName: "CodePipelinePolicies"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AllowSageMaker
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                Resource: "*"
+              - Sid: AllowKms
+                Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey*
+                  - kms:ReEncrypt*
+                Resource: "*"
+              - Sid: AllowCodePipeline
+                Effect: Allow
+                Action:
+                  - codepipeline:GetPipeline
+                  - codepipeline:GetPipelineState
+                  - codepipeline:GetPipelineExecution
+                  - codepipeline:PutApprovalResult
+                  - codepipeline:PutJobFailureResult
+                  - codepipeline:PutJobSuccessResult
+                Resource: "*"
+
+  MLOpsRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "sagemaker.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "cloudformation.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "codepipeline.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "events.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: "Admin"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "*"
+                Resource: "*"

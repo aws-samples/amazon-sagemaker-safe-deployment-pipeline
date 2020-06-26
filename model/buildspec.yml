@@ -1,0 +1,41 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.7
+    commands:
+      - echo "Installing requirements"
+      - pip install -r $CODEBUILD_SRC_DIR/model/requirements.txt
+      - pip install crhelper -t $CODEBUILD_SRC_DIR/custom_resource # Install custom resource helper into the CFN directory
+
+  pre_build:
+    commands:
+      - echo List source files
+      - echo Get pipeline name
+      - export PIPELINE_NAME=${CODEBUILD_INITIATOR#codepipeline/}
+      - echo $PIPELINE_NAME
+
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Run the workflow script
+      - cd $CODEBUILD_SRC_DIR
+      - python model/run.py --pipeline-name=$PIPELINE_NAME --model-name=$MODEL_NAME --role=$ROLE_ARN --data-bucket=$DATA_BUCKET --data-dir=$CODEBUILD_SRC_DIR_DataSourceOutput --output-dir=$CODEBUILD_SRC_DIR/assets --kms-key-id=$KMS_KEY_ID # --ecr-dir=$CODEBUILD_SRC_DIR_EcrSourceOutput
+      - echo Set unique commit in api to ensure re-deploy
+      - echo $CODEBUILD_RESOLVED_SOURCE_VERSION > api/commit.txt
+      - echo $CODEBUILD_BUILD_ID >> api/commit.txt # Add build ID when commit doesn't change
+
+  post_build:
+    commands:
+      - echo Package custom resources
+      - aws cloudformation package --template-file custom_resource/sagemaker-custom-resource.yml --output-template-file assets/template-custom-resource.yml --s3-bucket $ARTIFACT_BUCKET
+      - echo Package prod deployment
+      - aws cloudformation package --template-file assets/deploy-model-prd.yml --output-template-file assets/template-model-prd.yml --s3-bucket $ARTIFACT_BUCKET
+      - echo Done
+
+artifacts:
+  files:
+    - assets/*.json
+    - assets/*.yml
+  discard-paths: yes
