@@ -139,7 +139,7 @@ This section outlines cost considerations for running the SageMaker Safe Deploym
 - **CodeCommit** – $1/month if you didn't opt to use your own GitHub repository.
 - **CodeDeploy** – No cost with AWS Lambda.
 - **CodePipeline** – CodePipeline costs $1 per active pipeline* per month. Pipelines are free for the first 30 days after creation. More can be found at [AWS CodePipeline Pricing](https://aws.amazon.com/codepipeline/pricing/).
-- **CloudWatch** - This template includes a [Canary](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html), 1 dashboard and 3 alarms (2 for deployment and 1 for drift) which costs less than $10 per month.
+- **CloudWatch** - This template includes a [Canary](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html), 1 dashboard and 4 alarms (2 for deployment, 1 for model drift and 1 for canary) which costs less than $10 per month.
   - Canaries cost $0.0012 per run, or $5/month if they run every 10 minutes.
   - Dashboards cost $3/month.
   - Alarm metrics cost $0.10 per alarm.
