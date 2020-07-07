@@ -506,6 +506,26 @@ Resources:
                   - codepipeline:PutJobFailureResult
                   - codepipeline:PutJobSuccessResult
                 Resource: "*"
+              - Sid: AllowCloudWatch
+                Effect: Allow
+                Action:
+                  - synthetics:*
+                  - lambda:PublishLayerVersion
+                  - lambda:PublishVersion
+                  - lambda:CreateFunction
+                  - lambda:GetLayerVersion
+                  - lambda:AddPermission
+                  - cloudwatch:PutDashboard
+                  - cloudwatch:DeleteDashboards
+                Resource: "*"
+              - Sid: AllowPassRoleLambda
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: lambda.amazonaws.com
 
   MLOpsRole:
     Type: "AWS::IAM::Role"
@@ -529,12 +549,6 @@ Resources:
             Principal:
               Service:
                 - "codepipeline.amazonaws.com"
-            Action:
-              - "sts:AssumeRole"
-          - Effect: "Allow"
-            Principal:
-              Service:
-                - "events.amazonaws.com"
             Action:
               - "sts:AssumeRole"
       Path: "/"
