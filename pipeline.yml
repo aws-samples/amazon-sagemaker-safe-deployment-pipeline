@@ -12,7 +12,7 @@
 #       ParameterKey=GitHubToken,ParameterValue=<GitHub Token> \
 #       ParameterKey=ModelName,ParameterValue=<Model Name>
 
-Description: Create a CodePipeline for a Machine Learning Model
+Description: Create an Amazon SageMaker safe deployment pipeline
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
