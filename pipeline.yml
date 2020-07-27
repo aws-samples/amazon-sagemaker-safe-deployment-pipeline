@@ -1,28 +1,14 @@
-# Delete the stack:
-#
-# aws cloudformation delete-stack --stack-name sagemaker-safe-deployment
-#
-# Create the stack:
-#
-# aws cloudformation create-stack --stack-name sagemaker-safe-deployment \
-#   --template-body file://pipeline.yml \
-#   --capabilities CAPABILITY_IAM \
-#   --parameters \
-#       ParameterKey=GitHubUser,ParameterValue=<GitHub Username> \
-#       ParameterKey=GitHubToken,ParameterValue=<GitHub Token> \
-#       ParameterKey=ModelName,ParameterValue=<Model Name>
-
 Description: Create an Amazon SageMaker safe deployment pipeline
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Required Parameters
+          default: AWS Parameters
         Parameters:
           - ModelName
           - NotebookInstanceType
       - Label:
-          default: Optional GitHub Parameters
+          default: GitHub Parameters
         Parameters:
           - GitHubRepo
           - GitHubBranch
@@ -49,7 +35,8 @@ Parameters:
     Description: Name of the model
     MinLength: 1
     MaxLength: 15 # Limited to this due to mlops-{model}-{dev/prd}-{pipeline-executionid}
-    AllowedPattern: ^[a-zA-Z0-9](-*[a-zA-Z0-9])*
+    AllowedPattern: ^[a-z0-9](-*[a-z0-9])* # No uppercase due to use in S3 bucket name
+    ConstraintDescription: No UPPERCASE, max length of 15
   NotebookInstanceType:
     Type: String
     Default: ml.t3.medium
@@ -57,10 +44,8 @@ Parameters:
     AllowedValues:
       - ml.t3.medium
       - ml.t3.large
-      - ml.t3.2xlarge
       - ml.m5.large
       - ml.m5.xlarge
-      - ml.m5.2xlarge
     ConstraintDescription: Must select a valid notebook instance type.
   GitHubUser:
     Default: aws-samples
@@ -79,8 +64,8 @@ Parameters:
     Description: Github OAuthToken with access to Repo. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af. Go to https://github.com/settings/tokens
     Type: String
 
-Conditions:
-  GitHubTokenEmpty: !Equals [!Ref GitHubToken, ""]
+#Conditions:
+#  GitHubTokenEmpty: !Equals [!Ref GitHubToken, ""]
 
 Resources:
   KMSKey:
@@ -121,53 +106,55 @@ Resources:
       KmsKeyId: !Ref KMSKey
       SecretString: !Sub '{"username":"${GitHubUser}","password":"${GitHubToken}"}'
 
-  CodeCommitRepository:
-    Type: AWS::CodeCommit::Repository
-    Condition: GitHubTokenEmpty
-    Properties:
-      RepositoryName: !Ref GitHubRepo
-      RepositoryDescription: !Sub SageMaker safe deployment pipeline for ${ModelName}
+#  CodeCommitRepository:
+#    Type: AWS::CodeCommit::Repository
+#    Condition: GitHubTokenEmpty
+#    Properties:
+#      RepositoryName: !Ref GitHubRepo
+#      RepositoryDescription: !Sub SageMaker safe deployment pipeline for ${ModelName}
 
   SageMakerCodeRepository:
     Type: AWS::SageMaker::CodeRepository
     Properties:
       CodeRepositoryName: !Ref GitHubRepo
       GitConfig:
-        RepositoryUrl:
-          Fn::If:
-            - GitHubTokenEmpty
-            - !GetAtt CodeCommitRepository.CloneUrlHttp
-            - !Sub https://github.com/${GitHubUser}/${GitHubRepo}.git
+        RepositoryUrl: !Sub https://github.com/${GitHubUser}/${GitHubRepo}.git
+#        RepositoryUrl:
+#          Fn::If:
+#            - GitHubTokenEmpty
+#            - !GetAtt CodeCommitRepository.CloneUrlHttp
+#            - !Sub https://github.com/${GitHubUser}/${GitHubRepo}.git
         Branch: !Ref GitHubBranch
-        SecretArn:
-          Fn::If:
-            - GitHubTokenEmpty
-            - !Ref "AWS::NoValue"
-            - !Ref GitHubSecret
+        SecretArn: !Ref GitHubSecret
+#        SecretArn:
+#          Fn::If:
+#            - GitHubTokenEmpty
+#            - !Ref "AWS::NoValue"
+#            - !Ref GitHubSecret
 
   NotebookInstanceLifecycleConfig:
     Type: AWS::SageMaker::NotebookInstanceLifecycleConfig
     Properties:
       NotebookInstanceLifecycleConfigName: !Sub ${ModelName}-lifecycle-config
       OnCreate:
-        - Content:
-            Fn::If:
-              - GitHubTokenEmpty
-              - Fn::Base64:
-                  Fn::Sub: |
-                    #!/bin/bash
-                    # Clone the public github repo, and push it to a local codecommit branch
-                    export HOME=/root/
-                    echo "Configuring github for AWS credentials"
-                    git config --global credential.helper '!aws codecommit credential-helper $@'
-                    git config --global credential.UseHttpPath true
-                    cp /root/.gitconfig /home/ec2-user/ && chown ec2-user:ec2-user /home/ec2-user/.gitconfig
-                    echo "Clone the public repo and push it to codecommit repo"
-                    git clone -b ${GitHubBranch} "https://github.com/${GitHubUser}/${GitHubRepo}.git" /tmp/mlops-repo
-                    cd /tmp/mlops-repo
-                    git remote add codecommit ${CodeCommitRepository.CloneUrlHttp}
-                    git push --set-upstream codecommit ${GitHubBranch}
-              - Ref: AWS::NoValue
+#        - Content:
+#            Fn::If:
+#              - GitHubTokenEmpty
+#              - Fn::Base64:
+#                  Fn::Sub: |
+#                    #!/bin/bash
+#                    # Clone the public github repo, and push it to a local codecommit branch
+#                    export HOME=/root/
+#                    echo "Configuring github for AWS credentials"
+#                    git config --global credential.helper '!aws codecommit credential-helper $@'
+#                    git config --global credential.UseHttpPath true
+#                    cp /root/.gitconfig /home/ec2-user/ && chown ec2-user:ec2-user /home/ec2-user/.gitconfig
+#                    echo "Clone the public repo and push it to codecommit repo"
+#                    git clone -b ${GitHubBranch} "https://github.com/${GitHubUser}/${GitHubRepo}.git" /tmp/mlops-repo
+#                    cd /tmp/mlops-repo
+#                    git remote add codecommit ${CodeCommitRepository.CloneUrlHttp}
+#                    git push --set-upstream codecommit ${GitHubBranch}
+#              - Ref: AWS::NoValue
       OnStart:
         - Content:
             Fn::Base64:
@@ -285,32 +272,19 @@ Resources:
       Stages:
         - Name: Source
           Actions:
-            - Fn::If:
-                - GitHubTokenEmpty
-                - Name: GitSource
-                  ActionTypeId:
-                    Category: Source
-                    Owner: AWS
-                    Version: "1"
-                    Provider: CodeCommit
-                  Configuration:
-                    RepositoryName: !Ref GitHubRepo
-                    BranchName: !Ref GitHubBranch
-                  OutputArtifacts:
-                    - Name: ModelSourceOutput
-                - Name: GitSource
-                  ActionTypeId:
-                    Category: Source
-                    Owner: ThirdParty
-                    Version: "1"
-                    Provider: GitHub
-                  OutputArtifacts:
-                    - Name: ModelSourceOutput
-                  Configuration:
-                    Owner: !Ref GitHubUser
-                    Repo: !Ref GitHubRepo
-                    Branch: !Ref GitHubBranch
-                    OAuthToken: !Ref GitHubToken
+            - Name: GitSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: "1"
+                Provider: GitHub
+              OutputArtifacts:
+                - Name: ModelSourceOutput
+              Configuration:
+                Owner: !Ref GitHubUser
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubToken
             - Name: DataSource
               ActionTypeId:
                 Category: Source
