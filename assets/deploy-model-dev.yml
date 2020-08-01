@@ -43,7 +43,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub mlops-${ModelName}-dec-${TrainJobId}
-    DependsOn: Model
 
   Endpoint:
     Type: "AWS::SageMaker::Endpoint"
@@ -53,4 +52,3 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub mlops-${ModelName}-dev-${TrainJobId}
-    DependsOn: EndpointConfig
