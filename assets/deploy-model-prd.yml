@@ -59,7 +59,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub mlops-${ModelName}-prd-${TrainJobId}
-    DependsOn: EndpointConfig
 
   SagemakerDataCapture:
     Type: Custom::EnableDataCapture
@@ -85,6 +84,7 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.7
       Role: !GetAtt ApiFunctionRole.Arn
+      KmsKeyArn: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}
       AutoPublishAlias: "live"
       #AutoPublishCodeSha256: !Ref TrainSha256
       DeploymentPreference:
@@ -113,7 +113,7 @@ Resources:
             Path: /api
             Method: post
     DependsOn: SagemakerDataCapture
-    Description: "Api deployment that invokes SagemMaker endpoint"
+    Description: "Api deployment that invokes SageMaker endpoint"
 
   ApiFunctionRole:
     Type: AWS::IAM::Role
@@ -147,6 +147,7 @@ Resources:
       CodeUri: ../api
       Handler: pre_traffic_hook.lambda_handler
       Runtime: python3.7
+      KmsKeyArn: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -177,6 +178,7 @@ Resources:
       CodeUri: ../api
       Handler: post_traffic_hook.lambda_handler
       Runtime: python3.7
+      KmsKeyArn: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}
       Policies:
         - Version: "2012-10-17"
           Statement:
