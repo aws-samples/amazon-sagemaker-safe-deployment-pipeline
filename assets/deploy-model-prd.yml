@@ -45,6 +45,19 @@ Resources:
           InstanceType: ml.m5.large
           ModelName: !GetAtt Model.ModelName
           VariantName: !Ref VariantName
+      DataCaptureConfig:
+        CaptureContentTypeHeader:
+          CsvContentTypes:
+            - "text/csv"
+          JsonContentTypes:
+            - "application/json"
+        CaptureOptions:
+          - CaptureMode: Input
+          - CaptureMode: Output
+        DestinationS3Uri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/datacapture
+        EnableCapture: True
+        InitialSamplingPercentage: 100
+        KmsKeyId: !Ref KmsKeyId
       EndpointConfigName: !Sub mlops-${ModelName}-pec-${TrainJobId}
       KmsKeyId: !Ref KmsKeyId
       Tags:
@@ -59,17 +72,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub mlops-${ModelName}-prd-${TrainJobId}
-
-  SagemakerDataCapture:
-    Type: Custom::EnableDataCapture
-    Properties:
-      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sagemaker-cfn-enable-data-capture"
-      EndpointName: !GetAtt Endpoint.EndpointName
-      VariantName: !Ref VariantName
-      EndpointConfigName: !Sub mlops-${ModelName}-pdc-${TrainJobId}
-      DataCaptureUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/datacapture
-      KmsKeyId: !Ref KmsKeyId
-    DependsOn: Endpoint
 
   DeploymentCompleteTopic:
     Type: AWS::SNS::Topic
@@ -112,7 +114,6 @@ Resources:
           Properties:
             Path: /api
             Method: post
-    DependsOn: SagemakerDataCapture
     Description: "Api deployment that invokes SageMaker endpoint"
 
   ApiFunctionRole:
@@ -202,7 +203,7 @@ Resources:
       Environment:
         Variables:
           ENDPOINT_NAME: !GetAtt Endpoint.EndpointName
-          DATA_CAPTURE_URI: !GetAtt SagemakerDataCapture.DataCaptureEndpointUri
+          DATA_CAPTURE_URI: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/datacapture
       Description: "Perform checks post-shifting traffic to lambda"
 
   SagemakerMonitoringSchedule:
@@ -215,7 +216,6 @@ Resources:
       BaselineStatisticsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/statistics.json
       OutputS3URI: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/reports
       PassRoleArn: !Ref MLOpsRoleArn
-    DependsOn: SagemakerDataCapture # Wait until endpoint is update for data capture
 
   SagemakerScheduleAlarm:
     Type: "AWS::CloudWatch::Alarm"
@@ -282,7 +282,7 @@ Resources:
       RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
-    DependsOn: SagemakerDataCapture
+    DependsOn: Endpoint
 
   AutoScalingPolicy:
     Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
@@ -310,9 +310,3 @@ Outputs:
   RestApi:
     Description: "API Gateway endpoint URL for Prod stage for Regression function"
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/api/"
-  DataCaptureEndpointUri:
-    Description: "The base uri for data capture logs"
-    Value: !GetAtt SagemakerDataCapture.DataCaptureEndpointUri
-  ScheduleName:
-    Description: "The name of the monitoring schedule"
-    Value: !GetAtt SagemakerMonitoringSchedule.ScheduleName
