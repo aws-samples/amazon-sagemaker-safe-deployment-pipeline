@@ -1,16 +1,6 @@
 Description: Template for sagemaker cloud formation custom resources
 Transform: AWS::Serverless-2016-10-31
 Resources:
-  EnableDataCaptureFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: sagemaker-cfn-enable-data-capture
-      CodeUri: .
-      Handler: sagemaker_data_capture.lambda_handler
-      Runtime: python3.7
-      Role: !GetAtt SagemakerCustomResourceRole.Arn
-      Description: "Enables data capture on a given SageMaker Endpoint"
-
   SuggestBaselineFunction:
     Type: AWS::Serverless::Function
     Properties:
