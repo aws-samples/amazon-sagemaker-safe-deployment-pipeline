@@ -100,11 +100,11 @@ Finally, the SageMaker Notebook provides the ability to retrieve the results fro
 
 Following is a lis of approximate running times fo the pipeline
 
-* Full Pipeline: 45 minutes
+* Full Pipeline: 35 minutes
 * Start Build: 2 Minutes
 * Model Training and Baseline: 5 Minutes
 * Launch Dev Endpoint: 10 minutes
-* Launch Prod Endpoint: 25 minutes
+* Launch Prod Endpoint: 15 minutes
 * Monitoring Schedule: Runs on the hour
 
 ## Customizing for your own model
