@@ -6,15 +6,14 @@ import time
 
 import boto3
 import sagemaker
-from sagemaker.amazon.amazon_estimator import get_image_uri
 from sagemaker.workflow.airflow import training_config
 
 
 def get_training_image(region=None):
-    # This will be depreciated in python-sdk v2 for ImageURIProvider
-    # see: https://github.com/aws/sagemaker-python-sdk/issues/1464
     region = region or boto3.Session().region_name
-    return get_image_uri(region, "xgboost", "1.0-1")
+    return sagemaker.image_uris.retrieve(
+        region=region, framework="xgboost", version="1.0-1"
+    )
 
 
 def get_training_params(
@@ -32,8 +31,8 @@ def get_training_params(
     xgb = sagemaker.estimator.Estimator(
         image_uri,
         role,
-        train_instance_count=1,
-        train_instance_type="ml.m4.xlarge",
+        instance_count=1,
+        instance_type="ml.m4.xlarge",
         output_path=output_uri,
     )
     # Set the hyperparameters overriding with any defaults
@@ -50,8 +49,12 @@ def get_training_params(
     xgb.set_hyperparameters(**{**params, **hyperparameters})
 
     # Specify the data source
-    s3_input_train = sagemaker.s3_input(s3_data=training_uri, content_type="csv")
-    s3_input_val = sagemaker.s3_input(s3_data=validation_uri, content_type="csv")
+    s3_input_train = sagemaker.inputs.TrainingInput(
+        s3_data=training_uri, content_type="csv"
+    )
+    s3_input_val = sagemaker.inputs.TrainingInput(
+        s3_data=validation_uri, content_type="csv"
+    )
     data = {"train": s3_input_train, "validation": s3_input_val}
 
     # Get the training request

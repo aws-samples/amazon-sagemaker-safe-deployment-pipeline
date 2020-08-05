@@ -1,2 +1,2 @@
-boto3==1.14.27
-sagemaker==1.71.0
+boto3>=1.14.35
+sagemaker>=2.0.0
