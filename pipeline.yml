@@ -421,7 +421,9 @@ Resources:
               RunOrder: 2
         - Name: Train
           Actions:
-            - Name: RunWorkflow
+            - Name: StartWorkflow
+              InputArtifacts:
+                - Name: BuildOutput
               ActionTypeId:
                 Category: Invoke
                 Owner: AWS
@@ -433,7 +435,7 @@ Resources:
                 StateMachineArn: !GetAtt WorkflowPipeline.Arn
                 ExecutionNamePrefix: !Sub mlops-${ModelName}-
                 InputType: FilePath
-                Input: BuildOutput::workflow-input.json
+                Input: workflow-input.json
               RunOrder: 1
         - Name: DeployDev
           Actions:
