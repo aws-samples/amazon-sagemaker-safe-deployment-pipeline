@@ -509,6 +509,52 @@ Resources:
         - !Ref PipelineRole
         - !Ref MLOpsRole
 
+  CloudWatchEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub mlops-${ModelName}-cwe-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        -
+          PolicyName: "mlops-cwe-pipeline-execution"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+
+  CloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub mlops-${ModelName}-retrain
+      EventPattern:
+        source:
+          - aws.cloudwatch
+        detail-type:
+          - "CloudWatch Alarm State Change"
+        detail:
+          alarmName:
+            - !Sub mlops-${ModelName}-metric-gt-threshold
+          state:
+            value:
+              - "ALARM"
+      Targets:
+        -
+          Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+
   SageMakerRole:
     Type: AWS::IAM::Role
     Properties:
