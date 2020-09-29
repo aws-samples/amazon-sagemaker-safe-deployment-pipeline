@@ -374,21 +374,17 @@ def main(
     with open(os.path.join(output_dir, "workflow-graph.json"), "w") as f:
         f.write(workflow.definition.to_json(pretty=True))
 
-    # Define the experiment and trial name based on model name and job id
-    experiment_name = "mlops-{}".format(model_name)
-    trial_name = "mlops-{}-{}".format(model_name, job_id)
-
     # Write the workflow inputs to file
     with open(os.path.join(output_dir, "workflow-input.json"), "w") as f:
         workflow_inputs = {
-            "ExperimentName": experiment_name,
-            "TrialName": trial_name,
+            "ExperimentName": "mlops-{}".format(model_name),
+            "TrialName": "mlops-{}-{}".format(model_name, job_id),
             "GitBranch": git_branch,
             "GitCommitHash": git_commit_id,
             "DataVersionId": data_verison_id,
-            "BaselineJobName": trial_name,
+            "BaselineJobName": "mlops-{}-pbl-{}".format(model_name, job_id),
             "BaselineOutputUri": output_data["BaselineOutputUri"],
-            "TrainingJobName": trial_name,
+            "TrainingJobName": "mlops-{}-tj-{}".format(model_name, job_id),
         }
         json.dump(workflow_inputs, f)
 
