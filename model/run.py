@@ -319,7 +319,7 @@ def main(
 
     # Set the output Data
     output_data = {
-        "ModelOutputUri": "s3://{}/{}/model".format(sagemaker_bucket, model_name),
+        "ModelOutputUri": "s3://{}/{}".format(sagemaker_bucket, model_name),
         "BaselineOutputUri": f"s3://{sagemaker_bucket}/{model_name}/monitoring/baseline/mlops-{model_name}-pbl-{job_id}",
     }
     print("model output uri: {}".format(output_data["ModelOutputUri"]))
