@@ -320,6 +320,7 @@ def main(
     # Set the output Data
     output_data = {
         "ModelOutputUri": "s3://{}/{}/model".format(sagemaker_bucket, model_name),
+        "BaselineOutputUri": f"s3://{sagemaker_bucket}/{model_name}/monitoring/baseline/mlops-{model_name}-pbl-{job_id}",
     }
     print("model output uri: {}".format(output_data["ModelOutputUri"]))
 
@@ -386,7 +387,7 @@ def main(
             "GitCommitHash": git_commit_id,
             "DataVersionId": data_verison_id,
             "BaselineJobName": trial_name,
-            "BaselineOutputUri": f"s3://{sagemaker_bucket}/{model_name}/monitoring/baseline/mlops-{model_name}-pbl-{job_id}",
+            "BaselineOutputUri": output_data["BaselineOutputUri"],
             "TrainingJobName": trial_name,
         }
         json.dump(workflow_inputs, f)
