@@ -259,15 +259,23 @@ def get_prd_params(model_name, job_id, role, image_uri, kms_key_id):
     return {"Parameters": dict(dev_params, **prod_params)}
 
 
-def get_pipeline_id(pipeline_name):
+def get_pipeline_revision(pipeline_name):
     # Get pipeline execution id
     codepipeline = boto3.client("codepipeline")
     response = codepipeline.get_pipeline_state(name=pipeline_name)
-    # TODO: Return the git branch/commit/data version
-    return response["stageStates"][0]["latestExecution"]["pipelineExecutionId"]
+    # Get the GitSource and DataSource and JobId
+    rev = dict(
+        [
+            (r["actionName"], r["currentRevision"]["revisionId"])
+            for r in response["stageStates"][0]["actionStates"]
+        ]
+    )
+    rev["JobId"] = response["stageStates"][0]["latestExecution"]["pipelineExecutionId"]
+    return rev
 
 
 def main(
+    git_branch,
     pipeline_name,
     model_name,
     role,
@@ -300,17 +308,19 @@ def main(
         print("baseline uri: {}".format(input_data["BaselineUri"]))
 
     # Get the job id and source revisions
-    job_id = get_pipeline_id(pipeline_name)
+    revision = get_pipeline_revision(pipeline_name)
+    job_id = revision["JobId"]
+    git_commit_id = revision["GitSource"]
+    data_verison_id = revision["DataSource"]
     print("job id: {}".format(job_id))
+    print("git commit: {}".format(git_commit_id))
+    print("data version: {}".format(data_verison_id))
+
+    # Set the output Data
     output_data = {
         "ModelOutputUri": "s3://{}/{}/model".format(data_bucket, model_name),
     }
     print("model output uri: {}".format(output_data["ModelOutputUri"]))
-
-    # TODO: Pull these from code pipeline metadata
-    git_branch = "master"
-    git_commit_id = "xxx"
-    data_verison_id = "yyy"
 
     # Pass these into the training method
     hyperparameters = {}
@@ -399,6 +409,7 @@ if __name__ == "__main__":
     parser.add_argument("--role", required=True)
     parser.add_argument("--data-bucket", required=True)
     parser.add_argument("--kms-key-id", required=True)
+    parser.add_argument("--git-branch", required=True)
     parser.add_argument("--workflow-pipeline-arn", required=True)
     parser.add_argument("--create-experiment-function-name", required=True)
     parser.add_argument("--query-training-function-name", required=True)
