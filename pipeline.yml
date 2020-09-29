@@ -559,7 +559,9 @@ Resources:
             Effect: Allow
             Action:
               - codepipeline:*
-            Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+            Resource:
+              - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+              - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}/*"
       Roles:
         - !Ref SageMakerRole
 
