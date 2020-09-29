@@ -278,8 +278,9 @@ def main(
     git_branch,
     pipeline_name,
     model_name,
-    role,
-    data_bucket,
+    deploy_role,
+    sagemaker_role,
+    sagemaker_bucket,
     data_dir,
     output_dir,
     ecr_dir,
@@ -318,7 +319,7 @@ def main(
 
     # Set the output Data
     output_data = {
-        "ModelOutputUri": "s3://{}/{}/model".format(data_bucket, model_name),
+        "ModelOutputUri": "s3://{}/{}/model".format(sagemaker_bucket, model_name),
     }
     print("model output uri: {}".format(output_data["ModelOutputUri"]))
 
@@ -346,7 +347,7 @@ def main(
 
     # Create experiment step
     experiment_step = create_experiment_step(create_experiment_function_name)
-    baseline_step = create_baseline_step(input_data, execution_input, region, role)
+    baseline_step = create_baseline_step(input_data, execution_input, region, sagemaker_role)
     training_step = create_training_step(
         image_uri,
         hyperparameters,
@@ -355,7 +356,7 @@ def main(
         execution_input,
         query_training_function_name,
         region,
-        role,
+        sagemaker_role,
     )
     workflow_graph = create_graph(experiment_step, baseline_step, training_step)
 
@@ -385,17 +386,17 @@ def main(
             "GitCommitHash": git_commit_id,
             "DataVersionId": data_verison_id,
             "BaselineJobName": trial_name,
-            "BaselineOutputUri": f"s3://{data_bucket}/{model_name}/monitoring/baseline/mlops-{model_name}-pbl-{job_id}",
+            "BaselineOutputUri": f"s3://{sagemaker_bucket}/{model_name}/monitoring/baseline/mlops-{model_name}-pbl-{job_id}",
             "TrainingJobName": trial_name,
         }
         json.dump(workflow_inputs, f)
 
     # Write the dev & prod params for CFN
     with open(os.path.join(output_dir, "deploy-model-dev.json"), "w") as f:
-        params = get_dev_params(model_name, job_id, role, image_uri, kms_key_id)
+        params = get_dev_params(model_name, job_id, deploy_role, image_uri, kms_key_id)
         json.dump(params, f)
     with open(os.path.join(output_dir, "template-model-prd.json"), "w") as f:
-        params = get_prd_params(model_name, job_id, role, image_uri, kms_key_id)
+        params = get_prd_params(model_name, job_id, deploy_role, image_uri, kms_key_id)
         json.dump(params, f)
 
 
@@ -406,8 +407,9 @@ if __name__ == "__main__":
     parser.add_argument("--ecr-dir", required=False)
     parser.add_argument("--pipeline-name", required=True)
     parser.add_argument("--model-name", required=True)
-    parser.add_argument("--role", required=True)
-    parser.add_argument("--data-bucket", required=True)
+    parser.add_argument("--deploy-role", required=True)
+    parser.add_argument("--sagemaker-role", required=True)
+    parser.add_argument("--sagemaker-bucket", required=True)
     parser.add_argument("--kms-key-id", required=True)
     parser.add_argument("--git-branch", required=True)
     parser.add_argument("--workflow-pipeline-arn", required=True)

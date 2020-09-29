@@ -402,7 +402,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref BuildProject
                 PrimarySource: ModelSourceOutput
-                EnvironmentVariables: !Sub '[{"name":"DATA_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"ROLE_ARN","value":"${MLOpsRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_LAMBDA","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_LAMBDA","value":"${SfnQueryTraining}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"SAGEMAKER_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"DEPLOY_ROLE_ARN","value":"${DeployRole.Arn}","type":"PLAINTEXT"},{"name":"SAGEMAKER_ROLE_ARN","value":"${SageMakerRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_LAMBDA","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_LAMBDA","value":"${SfnQueryTraining}","type":"PLAINTEXT"}]'
               RunOrder: 1
             - Name: SetupTraining
               InputArtifacts:
@@ -414,7 +414,7 @@ Resources:
                 Provider: CloudFormation
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
+                RoleArn: !GetAtt DeployRole.Arn
                 Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
                 StackName: sagemaker-custom-resource # Use global name to re-use across templates
                 TemplatePath: BuildOutput::template-custom-resource.yml
@@ -449,7 +449,7 @@ Resources:
                 Provider: CloudFormation
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
+                RoleArn: !GetAtt DeployRole.Arn
                 StackName: !Sub ${ModelName}-deploy-dev
                 TemplateConfiguration: BuildOutput::deploy-model-dev.json
                 TemplatePath: BuildOutput::deploy-model-dev.yml
@@ -478,7 +478,7 @@ Resources:
                 Provider: CloudFormation
               Configuration:
                 ActionMode: CREATE_UPDATE
-                RoleArn: !GetAtt MLOpsRole.Arn
+                RoleArn: !GetAtt DeployRole.Arn
                 Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
                 StackName: !Sub ${ModelName}-deploy-prd
                 TemplateConfiguration: BuildOutput::template-model-prd.json
@@ -647,7 +647,7 @@ Resources:
       Roles:
         - !Ref SageMakerRole
         - !Ref PipelineRole
-        - !Ref MLOpsRole
+        - !Ref DeployRole
 
   CloudWatchEventRole:
     Type: AWS::IAM::Role
@@ -805,9 +805,9 @@ Resources:
                 Effect: Allow
                 Action:
                   - iam:PassRole
-                Resource: !GetAtt MLOpsRole.Arn
+                Resource: !GetAtt DeployRole.Arn
 
-  MLOpsRole:
+  DeployRole:
     Type: "AWS::IAM::Role"
     Properties:
       RoleName: !Sub mlops-${ModelName}-deploy-role
