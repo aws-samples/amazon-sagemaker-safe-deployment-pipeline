@@ -425,7 +425,7 @@ Resources:
                 Version: "1"
                 Provider: Manual
               Configuration:
-                ExternalEntityLink: !Sub https://${ModelName}-notebook.notebook.${AWS::Region}.sagemaker.aws/notebooks/sagemaker-safe-deployment-pipeline/notebook/mlops.ipynb
+                ExternalEntityLink: !Sub https://${ModelName}-notebook.notebook.${AWS::Region}.sagemaker.aws/notebooks/${GitHubRepo}/notebook/mlops.ipynb
                 CustomData: "Shall this model be put into production?"
               RunOrder: 2
         - Name: DeployPrd
