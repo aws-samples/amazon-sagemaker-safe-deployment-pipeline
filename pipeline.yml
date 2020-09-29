@@ -404,6 +404,21 @@ Resources:
                 PrimarySource: ModelSourceOutput
                 EnvironmentVariables: !Sub '[{"name":"DATA_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"ROLE_ARN","value":"${MLOpsRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_FUNCTION","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_FUNCTION","value":"${SfnQueryTraining.Arn}","type":"PLAINTEXT"}]'
               RunOrder: 1
+            - Name: SetupTraining
+              InputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !GetAtt MLOpsRole.Arn
+                Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+                StackName: sagemaker-custom-resource # Use global name to re-use across templates
+                TemplatePath: BuildOutput::template-custom-resource.yml
+              RunOrder: 2
         - Name: Train
           Actions:
             - Name: RunWorkflow
@@ -484,8 +499,7 @@ Resources:
             value:
               - "ALARM"
       Targets:
-        -
-          Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
           RoleArn: !GetAtt CloudWatchEventRole.Arn
           Id: !Sub codepipeline-${DeployPipeline}
 
@@ -640,21 +654,18 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: Allow
+          - Effect: Allow
             Principal:
               Service:
                 - events.amazonaws.com
             Action: sts:AssumeRole
       Path: /
       Policies:
-        -
-          PolicyName: "mlops-cwe-pipeline-execution"
+        - PolicyName: "mlops-cwe-pipeline-execution"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              -
-                Effect: Allow
+              - Effect: Allow
                 Action: codepipeline:StartPipelineExecution
                 Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
 
