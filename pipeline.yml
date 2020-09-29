@@ -20,6 +20,7 @@ Metadata:
           default: Required Parameters
         Parameters:
           - ModelName
+          - DatasetBucket
           - NotebookInstanceType
       - Label:
           default: Optional GitHub Parameters
@@ -31,6 +32,8 @@ Metadata:
     ParameterLabels:
       ModelName:
         default: Model Name
+      DatasetBucket:
+        default: S3 Bucket for Dataset
       NotebookInstanceType:
         default: Notebook Instance Type
       GitHubRepo:
@@ -63,6 +66,10 @@ Parameters:
       - ml.m5.xlarge
       - ml.m5.2xlarge
     ConstraintDescription: Must select a valid notebook instance type.
+  DatasetBucket:
+    Default: nyc-tlc
+    Description: S3 dataset bucket
+    Type: String
   GitHubUser:
     Default: aws-samples
     Description: Your GitHub username
@@ -91,7 +98,7 @@ Resources:
       EnableKeyRotation: true
       KeyPolicy:
         Version: "2012-10-17"
-        Id: !Ref AWS::StackName
+        Id: !Ref ModelName
         Statement:
           - Sid: Allows admin of the key
             Effect: Allow
@@ -178,6 +185,9 @@ Resources:
                 echo "export ARTIFACT_BUCKET=${ArtifactBucket}" >> /etc/profile.d/jupyter-env.sh
                 echo "export PIPELINE_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
                 echo "export MODEL_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
+                echo "export WORKFLOW_PIPELINE_ARN=${WorkflowPipeline.Arn}" >> /etc/profile.d/jupyter-env.sh
+                echo "export CREATE_EXPERIMENT_FUNCTION=${SfnCreateExperiment}" >> /etc/profile.d/jupyter-env.sh
+                echo "export QUERY_TRAINING_FUNCTION=${SfnQueryTraining}" >> /etc/profile.d/jupyter-env.sh
 
   NotebookInstance:
     Type: AWS::SageMaker::NotebookInstance
@@ -205,6 +215,105 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: model/buildspec.yml
       TimeoutInMinutes: 30
+
+  SfnCreateExperiment:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub ${ModelName}-sfn-create-experiment
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt SageMakerRole.Arn
+      Runtime: python3.6
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          from botocore.exceptions import ClientError
+          import logging
+          import json
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          sm_client = boto3.client('sagemaker')
+
+          def lambda_handler(event, context):
+              if ('ExperimentName' in event):
+                  experiment_name = event['ExperimentName']
+              else:
+                  raise KeyError('ExperimentName key not found in input: {}'.format(json.dumps(event)))
+              if ('TrialName' in event):
+                  trial_name = event['TrialName']
+              else:
+                  raise KeyError('TrialName key not found in input: {}'.format(json.dumps(event)))
+              experiment_created = False
+              try:
+                  response = sm_client.create_experiment(ExperimentName=experiment_name)
+                  logger.info("Created experiment: {}".format(experiment_name))
+                  experiment_created = True
+              except ClientError as error:
+                  if error.response['Error']['Code'] == 'ValidationException' and \
+                      'Experiment names must be unique' in error.response['Error']['Message']:
+                      logger.warn('Attempt to create duplicate experiment: {}'.format(experiment_name))
+                  else:
+                      raise error
+              trial_created = False
+              try:
+                  response = sm_client.create_trial(ExperimentName=experiment_name, TrialName=trial_name)
+                  logger.info("Created trial: {}".format(trial_name))
+                  experiment_created = True
+              except ClientError as error:
+                  if error.response['Error']['Code'] == 'ValidationException' and \
+                      'Trial names must be unique' in error.response['Error']['Message']:
+                      logger.warn('Attempt to create duplicate trial: {}'.format(trial_name))
+                  else:
+                      raise error
+              return {
+                  'statusCode': 200,
+                  'results': {
+                      'ExperimentCreated': experiment_created,
+                      'TrialCreated': trial_created,
+                  }
+              }
+      Description: "Create SageMaker Experiment and Trial"
+
+  SfnQueryTraining:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub ${ModelName}-sfn-query-training
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt SageMakerRole.Arn
+      Runtime: python3.6
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import logging
+          import json
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          sm_client = boto3.client('sagemaker')
+
+          def lambda_handler(event, context):
+              if ('TrainingJobName' in event):
+                  job_name = event['TrainingJobName']
+              else:
+                  raise KeyError('TrainingJobName not found for event: {}.'.format(json.dumps(event)))
+              response = sm_client.describe_training_job(TrainingJobName=job_name)
+              status = response['TrainingJobStatus']
+              logger.info("Training job:{} has status:{}.".format(job_name, status))
+              for index, metric in enumerate(response['FinalMetricDataList']):
+                  metric['Timestamp'] = metric['Timestamp'].timestamp()
+              return {
+                  'statusCode': 200,
+                  'results': {
+                      'TrainingJobName': job_name,
+                      'TrainingJobStatus': status,
+                      'TrainingMetrics': response['FinalMetricDataList']
+                  }
+              }
+      Description: "Query Training Metrics"
 
   CreateExperiment:
     Type: "AWS::Lambda::Function"
@@ -270,6 +379,24 @@ Resources:
               return 'Done'
 
       Description: "Function that creates an experiment and trial"
+
+  WorkflowPipeline:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub ${ModelName}
+      RoleArn: !GetAtt WorkflowExecutionRole.Arn
+      DefinitionString: |-
+        {
+          "Comment": "Place holder for sagemaker training",
+          "StartAt": "Plaecholder",
+          "States": {
+            "Plaecholder": {
+              "Type": "Pass",
+              "Result": "World",
+              "End": true
+            }
+          }
+        }
 
   DeployPipeline:
     Type: "AWS::CodePipeline::Pipeline"
@@ -449,11 +576,32 @@ Resources:
                 TemplatePath: BuildOutput::template-model-prd.yml
               RunOrder: 1
 
+  CloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub mlops-${ModelName}-retrain
+      EventPattern:
+        source:
+          - aws.cloudwatch
+        detail-type:
+          - "CloudWatch Alarm State Change"
+        detail:
+          alarmName:
+            - !Sub mlops-${ModelName}-metric-gt-threshold
+          state:
+            value:
+              - "ALARM"
+      Targets:
+        -
+          Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+
   CodeCommitPolicy:
     Type: AWS::IAM::Policy
     Condition: GitHubTokenEmpty
     Properties:
-      PolicyName: !Sub mlops-${ModelName}-codecommit-policy
+      PolicyName: !Sub mlops-codecommit-policy
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -466,10 +614,88 @@ Resources:
         - !Ref SageMakerRole
         - !Ref PipelineRole
 
+  StepFunctionsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub mlops-sfn-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowStepFunctions
+            Effect: Allow
+            Action:
+              - states:*
+            Resource:
+              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}"
+              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${ModelName}:*"
+          - Sid: AllowPassRoleStepFunctions
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt WorkflowExecutionRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: states.amazonaws.com
+      Roles:
+        - !Ref SageMakerRole
+
+  CodePipelinePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub mlops-codepipeline-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCodePipeline
+            Effect: Allow
+            Action:
+              - codepipeline:*
+            Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+      Roles:
+        - !Ref SageMakerRole
+
+  SageMakerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub mlops-sagemaker-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSageMaker
+            Effect: Allow
+            Action:
+              - sagemaker:CreateExperiment
+              - sagemaker:CreateTrial
+              - sagemaker:CreateHyperParameterTuningJob
+              - sagemaker:CreateModel
+              - sagemaker:CreateProcessingJob
+              - sagemaker:CreateTrainingJob
+              - sagemaker:CreateTransformJob
+              - sagemaker:DescribeTrainingJob
+              - sagemaker:DescribeHyperParameterTuningJob
+              - sagemaker:DescribeEndpoint
+              - sagemaker:DescribeEndpointConfig
+              - sagemaker:DescribeMonitoringSchedule
+              - sagemaker:DescribeProcessingJob
+              - sagemaker:DescribeTrainingJob
+              - sagemaker:DescribeTransformJob
+              - sagemaker:InvokeEndpoint
+              - sagemaker:ListTags
+              - sagemaker:ListMonitoringExecutions
+              - sagemaker:Search
+              - sagemaker:StopProcessingJob
+              - sagemaker:StopTrainingJob
+              - sagemaker:StopTransformJob
+              - kms:CreateGrant
+            Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/mlops-${ModelName}*
+      Roles:
+        - !Ref SageMakerRole
+        - !Ref WorkflowExecutionRole
+
   S3Policy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub mlops-${ModelName}-s3-policy
+      PolicyName: !Sub mlops-s3-policy
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -482,7 +708,7 @@ Resources:
               - s3:ListBucket
               - s3:PutObject
             Resource:
-              - arn:aws:s3:::nyc-tlc/*
+              - !Sub arn:aws:s3:::${DatasetBucket}/*
               - !Sub arn:aws:s3:::${ArtifactBucket}/*
               - !Sub arn:aws:s3:::${ArtifactBucket}
               - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}/*
@@ -534,27 +760,6 @@ Resources:
                 Action: codepipeline:StartPipelineExecution
                 Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
 
-  CloudWatchEventRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub mlops-${ModelName}-retrain
-      EventPattern:
-        source:
-          - aws.cloudwatch
-        detail-type:
-          - "CloudWatch Alarm State Change"
-        detail:
-          alarmName:
-            - !Sub mlops-${ModelName}-metric-gt-threshold
-          state:
-            value:
-              - "ALARM"
-      Targets:
-        -
-          Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
-          RoleArn: !GetAtt CloudWatchEventRole.Arn
-          Id: !Sub codepipeline-${DeployPipeline}
-
   SageMakerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -562,6 +767,12 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
           - Effect: "Allow"
             Principal:
               Service:
@@ -574,16 +785,10 @@ Resources:
                 - "codebuild.amazonaws.com"
             Action:
               - "sts:AssumeRole"
-          - Effect: "Allow"
-            Principal:
-              Service:
-                - "lambda.amazonaws.com"
-            Action:
-              - "sts:AssumeRole"
       ManagedPolicyArns:
         - "arn:aws:iam::aws:policy/CloudWatchSyntheticsFullAccess"
       Policies:
-        - PolicyName: "mlops-sagemaker-policy"
+        - PolicyName: "mlops-notebook-policy"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -594,29 +799,6 @@ Resources:
                   - cloudformation:DescribeStackEvents
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ModelName}*
-              - Sid: SageMakerTesting
-                Effect: Allow
-                Action:
-                  - sagemaker:CreateExperiment
-                  - sagemaker:CreateTrial
-                  - sagemaker:DescribeEndpoint
-                  - sagemaker:DescribeEndpointConfig
-                  - sagemaker:DescribeMonitoringSchedule
-                  - sagemaker:DescribeProcessingJob
-                  - sagemaker:InvokeEndpoint
-                  - sagemaker:ListMonitoringExecutions
-                  - sagemaker:Search
-                Resource: "*"
-              - Sid: AllowCodePipeline
-                Effect: Allow
-                Action:
-                  - codepipeline:GetPipeline
-                  - codepipeline:GetPipelineState
-                  - codepipeline:GetPipelineExecution
-                  - codepipeline:PutApprovalResult
-                  - codepipeline:PutJobFailureResult
-                  - codepipeline:PutJobSuccessResult
-                Resource: "*"
               - Sid: AllowCloudWatch
                 Effect: Allow
                 Action:
@@ -628,14 +810,52 @@ Resources:
                   - cloudwatch:DeleteDashboards
                   - iam:GetRole
                 Resource: "*"
-              - Sid: AllowPassRoleLambda
+
+  WorkflowExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub mlops-${ModelName}-sfn-execution-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/CloudWatchEventsFullAccess"
+      Policies:
+        - PolicyName: "mlops-sfn-sagemaker"
+          PolicyDocument:
+            Statement:
+              - Sid: AllowLambda
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt SfnCreateExperiment.Arn
+                  - !GetAtt SfnQueryTraining.Arn
+              - Sid: AllowEvents
+                Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:DescribeRule
+                  - events:PutRule
+                Resource:
+                  - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTrainingJobsRule
+                  - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTuningJobsRule
+                  - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerProcessingJobsRule
+              - Sid: AllowPassRole
                 Effect: Allow
                 Action:
                   - iam:PassRole
-                Resource: "*"
+                Resource: !GetAtt SageMakerRole.Arn
                 Condition:
                   StringEquals:
-                    iam:PassedToService: lambda.amazonaws.com
+                    iam:PassedToService: sagemaker.amazonaws.com
+            Version: "2012-10-17"
 
   PipelineRole:
     Type: "AWS::IAM::Role"
@@ -663,7 +883,7 @@ Resources:
                   - lambda:AddPermission
                   - lambda:CreateFunction
                   - lambda:DeleteFunction
-                  - lambda:InvokeFunction
+                  - lambda:InvokeFunction # TODO: Remove
                 Resource: "*"
               - Sid: CodeBuild
                 Effect: Allow
@@ -775,3 +995,11 @@ Resources:
                 Condition:
                   StringEquals:
                     iam:PassedToService: sagemaker.amazonaws.com
+
+Outputs:
+  DeployPipeline:
+    Description: The deployment pipeline
+    Value: !Ref DeployPipeline
+  WorkflowPipeline:
+    Description: The workflow code pipeline
+    Value: !Ref WorkflowPipeline
