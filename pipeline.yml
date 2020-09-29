@@ -186,8 +186,8 @@ Resources:
                 echo "export PIPELINE_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
                 echo "export MODEL_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
                 echo "export WORKFLOW_PIPELINE_ARN=${WorkflowPipeline.Arn}" >> /etc/profile.d/jupyter-env.sh
-                echo "export CREATE_EXPERIMENT_FUNCTION=${SfnCreateExperiment}" >> /etc/profile.d/jupyter-env.sh
-                echo "export QUERY_TRAINING_FUNCTION=${SfnQueryTraining}" >> /etc/profile.d/jupyter-env.sh
+                echo "export CREATE_EXPERIMENT_LAMBDA=${SfnCreateExperiment}" >> /etc/profile.d/jupyter-env.sh
+                echo "export QUERY_TRAINING_LAMBDA=${SfnQueryTraining}" >> /etc/profile.d/jupyter-env.sh
 
   NotebookInstance:
     Type: AWS::SageMaker::NotebookInstance
@@ -402,7 +402,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref BuildProject
                 PrimarySource: ModelSourceOutput
-                EnvironmentVariables: !Sub '[{"name":"DATA_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"ROLE_ARN","value":"${MLOpsRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_FUNCTION","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_FUNCTION","value":"${SfnQueryTraining.Arn}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"DATA_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"ROLE_ARN","value":"${MLOpsRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_LAMBDA","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_LAMBDA","value":"${SfnQueryTraining}","type":"PLAINTEXT"}]'
               RunOrder: 1
             - Name: SetupTraining
               InputArtifacts:

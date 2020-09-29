@@ -263,11 +263,11 @@ def get_pipeline_id(pipeline_name):
     # Get pipeline execution id
     codepipeline = boto3.client("codepipeline")
     response = codepipeline.get_pipeline_state(name=pipeline_name)
+    # TODO: Return the git branch/commit/data version
     return response["stageStates"][0]["latestExecution"]["pipelineExecutionId"]
 
 
 def main(
-    git_commit_id,
     pipeline_name,
     model_name,
     role,
@@ -284,13 +284,6 @@ def main(
     region = boto3.Session().region_name
     print("region: {}".format(region))
 
-    # Get the job id and source revisions
-    job_id = get_pipeline_id(pipeline_name)
-    print("job id: {}".format(job_id))
-    output_data = {
-        "ModelOutputUri": "s3://{}/{}/model".format(data_bucket, model_name),
-    }
-
     if ecr_dir:
         # Load the image uri and input data config
         with open(os.path.join(ecr_dir, "imageDetail.json"), "r") as f:
@@ -302,11 +295,22 @@ def main(
 
     with open(os.path.join(data_dir, "inputData.json"), "r") as f:
         input_data = json.load(f)
-        print(
-            "training uri: {}\nvalidation uri: {}\n baseline uri: {}".format(
-                input_data["TrainingUri"], input_data["ValidationUri"], input_data["BaselineUri"]
-            )
-        )
+        print("training uri: {}".format(input_data["TrainingUri"]))
+        print("validation uri: {}".format(input_data["ValidationUri"]))
+        print("baseline uri: {}".format(input_data["BaselineUri"]))
+
+    # Get the job id and source revisions
+    job_id = get_pipeline_id(pipeline_name)
+    print("job id: {}".format(job_id))
+    output_data = {
+        "ModelOutputUri": "s3://{}/{}/model".format(data_bucket, model_name),
+    }
+    print("model output uri: {}".format(output_data["ModelOutputUri"]))
+
+    # TODO: Pull these from code pipeline metadata
+    git_branch = "master"
+    git_commit_id = "xxx"
+    data_verison_id = "yyy"
 
     # Pass these into the training method
     hyperparameters = {}
@@ -358,10 +362,6 @@ def main(
     with open(os.path.join(output_dir, "workflow-graph.json"), "w") as f:
         f.write(workflow.definition.to_json(pretty=True))
 
-    # TODO: Pull these from arguments
-    git_branch = "master"
-    data_verison_id = "yyy"
-
     # Define the experiment and trial name based on model name and job id
     experiment_name = "mlops-{}".format(model_name)
     trial_name = "mlops-{}-{}".format(model_name, job_id)
@@ -394,25 +394,14 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--ecr-dir", required=False)
-    parser.add_argument("--git-commit-id", required=False)
-    parser.add_argument("--pipeline-name", default=os.environ.get("PIPELINE_NAME"), required=True)
-    parser.add_argument("--model-name", default=os.environ.get("MODEL_NAME"), required=True)
-    parser.add_argument("--role", default=os.environ.get("ROLE_ARN"), required=True)
-    parser.add_argument("--data-bucket", default=os.environ.get("DATA_BUCKET"), required=True)
-    parser.add_argument("--kms-key-id", default=os.environ.get("KMS_KEY_ID"), required=True)
-    parser.add_argument(
-        "--workflow-pipeline-arn", default=os.environ.get("WORKFLOW_PIPELINE_ARN"), required=True
-    )
-    parser.add_argument(
-        "--create-experiment-function",
-        default=os.environ.get("CREATE_EXPERIMENT_FUNCTION"),
-        required=True,
-    )
-    parser.add_argument(
-        "--query-training-function",
-        default=os.environ.get("QUERY_TRAINING_FUNCTION"),
-        required=True,
-    )
+    parser.add_argument("--pipeline-name", required=True)
+    parser.add_argument("--model-name", required=True)
+    parser.add_argument("--role", required=True)
+    parser.add_argument("--data-bucket", required=True)
+    parser.add_argument("--kms-key-id", required=True)
+    parser.add_argument("--workflow-pipeline-arn", required=True)
+    parser.add_argument("--create-experiment-function-name", required=True)
+    parser.add_argument("--query-training-function-name", required=True)
     args = vars(parser.parse_args())
     print("args: {}".format(args))
     main(**args)
