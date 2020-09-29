@@ -21,7 +21,7 @@ phases:
       - echo Build started on `date`
       - echo Run the workflow script
       - cd $CODEBUILD_SRC_DIR
-      - python model/run.py --pipeline-name=$PIPELINE_NAME --model-name=$MODEL_NAME --role=$ROLE_ARN --data-bucket=$DATA_BUCKET --data-dir=$CODEBUILD_SRC_DIR_DataSourceOutput --output-dir=$CODEBUILD_SRC_DIR/assets --kms-key-id=$KMS_KEY_ID # --ecr-dir=$CODEBUILD_SRC_DIR_EcrSourceOutput
+      - python model/run.py --commit-id CODEBUILD_RESOLVED_SOURCE_VERSION --data-dir=$CODEBUILD_SRC_DIR_DataSourceOutput --output-dir=$CODEBUILD_SRC_DIR/assets # --ecr-dir=$CODEBUILD_SRC_DIR_EcrSourceOutput
       - echo Set unique commit in api to ensure re-deploy
       - echo $CODEBUILD_RESOLVED_SOURCE_VERSION > api/commit.txt
       - echo $CODEBUILD_BUILD_ID >> api/commit.txt # Add build ID when commit doesn't change

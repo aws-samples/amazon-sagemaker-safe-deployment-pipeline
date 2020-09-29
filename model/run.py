@@ -5,27 +5,115 @@ import sys
 import time
 
 import boto3
+
 import sagemaker
-from sagemaker.workflow.airflow import training_config
+from sagemaker.image_uris import retrieve
+from sagemaker.processing import Processor, ProcessingInput, ProcessingOutput
+from sagemaker.model_monitor.dataset_format import DatasetFormat
+
+import stepfunctions
+from stepfunctions import steps
+from stepfunctions.inputs import ExecutionInput
+from stepfunctions.workflow import Workflow
 
 
-def get_training_image(region=None):
-    region = region or boto3.Session().region_name
-    return sagemaker.image_uris.retrieve(
-        region=region, framework="xgboost", version="1.0-1"
+def create_experiment_step(create_experiment_function_name):
+    create_experiment_step = steps.compute.LambdaStep(
+        "Create Experiment",
+        parameters={
+            "FunctionName": create_experiment_function_name,
+            "Payload": {"ExperimentName.$": "$.ExperimentName", "TrialName.$": "$.TrialName",},
+        },
+        result_path="$.CreateTrialResults",
+    )
+    return create_experiment_step
+
+
+def create_baseline_step(input_data, execution_input, region, role):
+    # Define the enviornment
+    dataset_format = DatasetFormat.csv()
+    env = {
+        "dataset_format": json.dumps(dataset_format),
+        "dataset_source": "/opt/ml/processing/input/baseline_dataset_input",
+        "output_path": "/opt/ml/processing/output",
+        "publish_cloudwatch_metrics": "Disabled",  # Have to be disabled from processing job?
+    }
+
+    # Define the inputs and outputs
+    inputs = [
+        ProcessingInput(
+            source=input_data["BaselineUri"],
+            destination="/opt/ml/processing/input/baseline_dataset_input",
+            input_name="baseline_dataset_input",
+        ),
+    ]
+    outputs = [
+        ProcessingOutput(
+            source="/opt/ml/processing/output",
+            destination=execution_input["BaselineOutputUri"],
+            output_name="monitoring_output",
+        ),
+    ]
+
+    # Get the default model monitor container
+    monor_monitor_container_uri = retrieve(
+        region=region, framework="model-monitor", version="latest"
     )
 
+    # Create the processor
+    monitor_analyzer = Processor(
+        image_uri=monor_monitor_container_uri,
+        role=role,
+        instance_count=1,
+        instance_type="ml.m5.xlarge",
+        max_runtime_in_seconds=1800,
+        env=env,
+    )
 
-def get_training_params(
-    model_name,
-    job_id,
-    role,
+    # Create the processing step
+    baseline_step = steps.sagemaker.ProcessingStep(
+        "Baseline Job",
+        processor=monitor_analyzer,
+        job_name=execution_input["BaselineJobName"],
+        inputs=inputs,
+        outputs=outputs,
+        experiment_config={
+            "ExperimentName": execution_input["ExperimentName"],  # '$.ExperimentName',
+            "TrialName": execution_input["TrialName"],
+            "TrialComponentDisplayName": "Baseline",
+        },
+        tags={
+            "GitBranch": execution_input["GitBranch"],
+            "GitCommitHash": execution_input["GitCommitHash"],
+            "DataVersionId": execution_input["DataVersionId"],
+        },
+    )
+
+    # Add the catch
+    baseline_step.add_catch(
+        steps.states.Catch(
+            error_equals=["States.TaskFailed"],
+            next_step=stepfunctions.steps.states.Fail(
+                "Baseline failed", cause="SageMakerBaselineJobFailed"
+            ),
+        )
+    )
+    return baseline_step
+
+
+def get_training_image(region):
+    return sagemaker.image_uris.retrieve(region=region, framework="xgboost", version="latest")
+
+
+def create_training_step(
     image_uri,
-    training_uri,
-    validation_uri,
-    output_uri,
     hyperparameters,
-    kms_key_id,
+    input_data,
+    output_data,
+    execution_input,
+    query_training_function_name,
+    region,
+    role,
 ):
     # Create the estimator
     xgb = sagemaker.estimator.Estimator(
@@ -33,10 +121,11 @@ def get_training_params(
         role,
         instance_count=1,
         instance_type="ml.m4.xlarge",
-        output_path=output_uri,
+        output_path=output_data["ModelOutputUri"],  # NOTE: Can't use execution_input here
     )
+
     # Set the hyperparameters overriding with any defaults
-    params = {
+    hp = {
         "max_depth": "9",
         "eta": "0.2",
         "gamma": "4",
@@ -46,52 +135,105 @@ def get_training_params(
         "early_stopping_rounds": "10",
         "num_round": "100",
     }
-    xgb.set_hyperparameters(**{**params, **hyperparameters})
+    xgb.set_hyperparameters(**{**hp, **hyperparameters})
 
     # Specify the data source
     s3_input_train = sagemaker.inputs.TrainingInput(
-        s3_data=training_uri, content_type="csv"
+        s3_data=input_data["TrainingUri"], content_type="csv"
     )
     s3_input_val = sagemaker.inputs.TrainingInput(
-        s3_data=validation_uri, content_type="csv"
+        s3_data=input_data["ValidationUri"], content_type="csv"
     )
     data = {"train": s3_input_train, "validation": s3_input_val}
 
-    # Get the training request
-    request = training_config(xgb, inputs=data, job_name=job_id)
-    return {
-        "Parameters": {
-            "ModelName": model_name,
-            "TrainJobId": job_id,
-            "TrainJobRequest": json.dumps(request),
-            "KmsKeyId": kms_key_id,
-        }
-    }
+    # Create the training step
+    training_step = steps.TrainingStep(
+        "Training Job",
+        estimator=xgb,
+        data=data,
+        job_name=execution_input["TrainingJobName"],
+        experiment_config={
+            "ExperimentName": execution_input["ExperimentName"],
+            "TrialName": execution_input["TrialName"],
+            "TrialComponentDisplayName": "Training",
+        },
+        tags={
+            "GitBranch": execution_input["GitBranch"],
+            "GitCommitHash": execution_input["GitCommitHash"],
+            "DataVersionId": execution_input["DataVersionId"],
+        },
+        result_path="$.TrainingResults",
+    )
+
+    # Add the catch
+    training_step.add_catch(
+        stepfunctions.steps.states.Catch(
+            error_equals=["States.TaskFailed"],
+            next_step=stepfunctions.steps.states.Fail(
+                "Training failed", cause="SageMakerTrainingJobFailed"
+            ),
+        )
+    )
+
+    # Must follow the training test
+    model_step = steps.sagemaker.ModelStep(
+        "Save Model",
+        input_path="$.TrainingResults",
+        model=training_step.get_expected_model(),
+        model_name=execution_input["TrainingJobName"],
+        result_path="$.ModelStepResults",
+    )
+
+    # Query the training step
+    training_query_step = steps.compute.LambdaStep(
+        "Query Training Results",
+        parameters={
+            "FunctionName": query_training_function_name,
+            "Payload": {"TrainingJobName.$": "$.TrainingJobName"},
+        },
+        result_path="$.QueryTrainingResults",
+    )
+
+    check_accuracy_fail_step = steps.states.Fail(
+        "Model Error Too Low", comment="RMSE accuracy higher than threshold"
+    )
+
+    check_accuracy_succeed_step = steps.states.Succeed("Model Error Acceptable")
+
+    # TODO: Update query method to query validation error using better result path
+    threshold_rule = steps.choice_rule.ChoiceRule.NumericLessThan(
+        variable=training_query_step.output()["QueryTrainingResults"]["Payload"]["results"][
+            "TrainingMetrics"
+        ][0]["Value"],
+        value=10,
+    )
+
+    check_accuracy_step = steps.states.Choice("RMSE < 10")
+
+    check_accuracy_step.add_choice(rule=threshold_rule, next_step=check_accuracy_succeed_step)
+    check_accuracy_step.default_choice(next_step=check_accuracy_fail_step)
+
+    # Return the chain of these steps
+    return steps.states.Chain([training_step, model_step, training_query_step, check_accuracy_step])
 
 
-def get_experiment(model_name):
-    return {
-        "ExperimentName": model_name,
-    }
+def create_graph(create_experiment_step, baseline_step, training_step):
+    sagemaker_jobs = steps.states.Parallel("SageMaker Jobs")
+    sagemaker_jobs.add_branch(baseline_step)
+    sagemaker_jobs.add_branch(training_step)
 
+    # Do we need specific failure for the jobs for group?
+    sagemaker_jobs.add_catch(
+        stepfunctions.steps.states.Catch(
+            error_equals=["States.TaskFailed"],
+            next_step=stepfunctions.steps.states.Fail(
+                "SageMaker Jobs failed", cause="SageMakerJobsFailed"
+            ),
+        )
+    )
 
-def get_trial(model_name, job_id):
-    return {
-        "ExperimentName": model_name,
-        "TrialName": job_id,
-    }
-
-
-def get_suggest_baseline(model_name, job_id, role, baseline_uri, kms_key_id):
-    return {
-        "Parameters": {
-            "ModelName": model_name,
-            "TrainJobId": job_id,
-            "MLOpsRoleArn": role,
-            "BaselineInputUri": baseline_uri,
-            "KmsKeyId": kms_key_id,
-        }
-    }
+    # Return the workflow graph
+    return steps.states.Chain([create_experiment_step, sagemaker_jobs])
 
 
 def get_dev_params(model_name, job_id, role, image_uri, kms_key_id):
@@ -108,9 +250,7 @@ def get_dev_params(model_name, job_id, role, image_uri, kms_key_id):
 
 
 def get_prd_params(model_name, job_id, role, image_uri, kms_key_id):
-    dev_params = get_dev_params(model_name, job_id, role, image_uri, kms_key_id)[
-        "Parameters"
-    ]
+    dev_params = get_dev_params(model_name, job_id, role, image_uri, kms_key_id)["Parameters"]
     prod_params = {
         "VariantName": "prd-{}".format(model_name),
         "ScheduleMetricName": "feature_baseline_drift_total_amount",
@@ -127,6 +267,7 @@ def get_pipeline_id(pipeline_name):
 
 
 def main(
+    git_commit_id,
     pipeline_name,
     model_name,
     role,
@@ -135,11 +276,20 @@ def main(
     output_dir,
     ecr_dir,
     kms_key_id,
+    workflow_pipeline_arn,
+    create_experiment_function_name,
+    query_training_function_name,
 ):
+    # Get the region
+    region = boto3.Session().region_name
+    print("region: {}".format(region))
+
     # Get the job id and source revisions
     job_id = get_pipeline_id(pipeline_name)
     print("job id: {}".format(job_id))
-    output_uri = "s3://{0}/{1}".format(data_bucket, model_name)
+    output_data = {
+        "ModelOutputUri": "s3://{}/{}/model".format(data_bucket, model_name),
+    }
 
     if ecr_dir:
         # Load the image uri and input data config
@@ -147,20 +297,18 @@ def main(
             image_uri = json.load(f)["ImageURI"]
     else:
         # Get the the managed image uri for current region
-        image_uri = get_training_image()
+        image_uri = get_training_image(region)
     print("image uri: {}".format(image_uri))
 
     with open(os.path.join(data_dir, "inputData.json"), "r") as f:
         input_data = json.load(f)
-        training_uri = input_data["TrainingUri"]
-        validation_uri = input_data["ValidationUri"]
-        baseline_uri = input_data["BaselineUri"]
         print(
             "training uri: {}\nvalidation uri: {}\n baseline uri: {}".format(
-                training_uri, validation_uri, baseline_uri
+                input_data["TrainingUri"], input_data["ValidationUri"], input_data["BaselineUri"]
             )
         )
 
+    # Pass these into the training method
     hyperparameters = {}
     if os.path.exists(os.path.join(data_dir, "hyperparameters.json")):
         with open(os.path.join(data_dir, "hyperparameters.json"), "r") as f:
@@ -168,39 +316,69 @@ def main(
             for i in hyperparameters:
                 hyperparameters[i] = str(hyperparameters[i])
 
+    # Define the step functions execution input schema
+    execution_input = ExecutionInput(
+        schema={
+            "GitBranch": str,
+            "GitCommitHash": str,
+            "DataVersionId": str,
+            "ExperimentName": str,
+            "TrialName": str,
+            "BaselineJobName": str,
+            "BaselineOutputUri": str,
+            "TrainingJobName": str,
+        }
+    )
+
+    # Create experiment step
+    experiment_step = create_experiment_step(create_experiment_function_name)
+    baseline_step = create_baseline_step(input_data, execution_input, region, role)
+    training_step = create_training_step(
+        image_uri,
+        hyperparameters,
+        input_data,
+        output_data,
+        execution_input,
+        query_training_function_name,
+        region,
+        role,
+    )
+    workflow_graph = create_graph(experiment_step, baseline_step, training_step)
+
+    # Update the workflow
+    workflow = Workflow.attach(workflow_pipeline_arn)
+    workflow.update(workflow_graph)
+    print("Updating workflow: {}".format(workflow.state_machine_arn))
+
     # Create output directory
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
-    # Write experiment and trial config
-    with open(os.path.join(output_dir, "experiment.json"), "w") as f:
-        config = get_experiment(model_name)
-        json.dump(config, f)
-    with open(os.path.join(output_dir, "trial.json"), "w") as f:
-        config = get_trial(model_name, job_id)
-        json.dump(config, f)
+    # Write the workflow graph to json
+    with open(os.path.join(output_dir, "workflow-graph.json"), "w") as f:
+        f.write(workflow.definition.to_json(pretty=True))
 
-    # Write the training request
-    with open(os.path.join(output_dir, "training-job.json"), "w") as f:
-        params = get_training_params(
-            model_name,
-            job_id,
-            role,
-            image_uri,
-            training_uri,
-            validation_uri,
-            output_uri,
-            hyperparameters,
-            kms_key_id,
-        )
-        json.dump(params, f)
+    # TODO: Pull these from arguments
+    git_branch = "master"
+    data_verison_id = "yyy"
 
-    # Write the baseline params for CFN
-    with open(os.path.join(output_dir, "suggest-baseline.json"), "w") as f:
-        params = get_suggest_baseline(
-            model_name, job_id, role, baseline_uri, kms_key_id
-        )
-        json.dump(params, f)
+    # Define the experiment and trial name based on model name and job id
+    experiment_name = "mlops-{}".format(model_name)
+    trial_name = "mlops-{}-{}".format(model_name, job_id)
+
+    # Write the workflow inputs to file
+    with open(os.path.join(output_dir, "workflow-input.json"), "w") as f:
+        workflow_inputs = {
+            "ExperimentName": experiment_name,
+            "TrialName": trial_name,
+            "GitBranch": git_branch,
+            "GitCommitHash": git_commit_id,
+            "DataVersionId": data_verison_id,
+            "BaselineJobName": trial_name,
+            "BaselineOutputUri": f"s3://{data_bucket}/{model_name}/monitoring/baseline/mlops-{model_name}-pbl-{job_id}",
+            "TrainingJobName": trial_name,
+        }
+        json.dump(workflow_inputs, f)
 
     # Write the dev & prod params for CFN
     with open(os.path.join(output_dir, "deploy-model-dev.json"), "w") as f:
@@ -213,14 +391,28 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Load parameters")
-    parser.add_argument("--pipeline-name", required=True)
-    parser.add_argument("--model-name", required=True)
-    parser.add_argument("--role", required=True)
-    parser.add_argument("--data-bucket", required=True)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--ecr-dir", required=False)
-    parser.add_argument("--kms-key-id", required=True)
+    parser.add_argument("--git-commit-id", required=False)
+    parser.add_argument("--pipeline-name", default=os.environ.get("PIPELINE_NAME"), required=True)
+    parser.add_argument("--model-name", default=os.environ.get("MODEL_NAME"), required=True)
+    parser.add_argument("--role", default=os.environ.get("ROLE_ARN"), required=True)
+    parser.add_argument("--data-bucket", default=os.environ.get("DATA_BUCKET"), required=True)
+    parser.add_argument("--kms-key-id", default=os.environ.get("KMS_KEY_ID"), required=True)
+    parser.add_argument(
+        "--workflow-pipeline-arn", default=os.environ.get("WORKFLOW_PIPELINE_ARN"), required=True
+    )
+    parser.add_argument(
+        "--create-experiment-function",
+        default=os.environ.get("CREATE_EXPERIMENT_FUNCTION"),
+        required=True,
+    )
+    parser.add_argument(
+        "--query-training-function",
+        default=os.environ.get("QUERY_TRAINING_FUNCTION"),
+        required=True,
+    )
     args = vars(parser.parse_args())
     print("args: {}".format(args))
     main(**args)

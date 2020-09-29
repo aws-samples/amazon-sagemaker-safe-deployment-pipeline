@@ -315,71 +315,6 @@ Resources:
               }
       Description: "Query Training Metrics"
 
-  CreateExperiment:
-    Type: "AWS::Lambda::Function"
-    Properties:
-      FunctionName: !Sub ${ModelName}-create-experiment
-      Handler: index.lambda_handler
-      MemorySize: 512
-      Role: !GetAtt SageMakerRole.Arn
-      Runtime: python3.6
-      Timeout: 60
-      Code:
-        ZipFile: |
-          import boto3
-          import io
-          import zipfile
-          import json
-
-          s3 = boto3.client('s3')
-          sm = boto3.client('sagemaker')
-          codepipeline = boto3.client('codepipeline')
-
-          def lambda_handler(event, context):
-              print('event', json.dumps(event))
-              jobId = event["CodePipeline.job"]["id"]
-              experiment = None
-              trial = None
-
-              try:
-                  for inputArtifacts in event["CodePipeline.job"]["data"]["inputArtifacts"]:
-                      if inputArtifacts['name'] == 'BuildOutput':
-                          s3Location = inputArtifacts['location']['s3Location']
-                          zip_bytes = s3.get_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'])['Body'].read()
-                          with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
-                            experiment = json.loads(z.read('experiment.json').decode('utf-8'))
-                            trial = json.loads(z.read('trial.json').decode('utf-8'))
-
-                  if experiment is None or trial is None:
-                    raise(Exception("Experiment and Trail config not found"))
-
-                  try:
-                      response = sm.create_experiment(**experiment)
-                      print('created exp', response)
-                  except Exception as e:
-                      print('error creating exp', e)
-                  try:
-                      response = sm.create_trial(**trial)
-                      print('created trial', response)
-                  except Exception as e:
-                      print('error creating trial', e)
-
-                  # and update codepipeline
-                  codepipeline.put_job_success_result(jobId=jobId)
-              except Exception as e:
-                  print(e)
-                  resp = codepipeline.put_job_failure_result(
-                      jobId=jobId,
-                      failureDetails={
-                          'type': 'ConfigurationError',
-                          'message': str(e),
-                          'externalExecutionId': context.aws_request_id
-                      }
-                  )
-              return 'Done'
-
-      Description: "Function that creates an experiment and trial"
-
   WorkflowPipeline:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -467,67 +402,24 @@ Resources:
               Configuration:
                 ProjectName: !Ref BuildProject
                 PrimarySource: ModelSourceOutput
-                EnvironmentVariables: !Sub '[{"name":"DATA_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"ROLE_ARN","value":"${MLOpsRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"DATA_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"ROLE_ARN","value":"${MLOpsRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_FUNCTION","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_FUNCTION","value":"${SfnQueryTraining.Arn}","type":"PLAINTEXT"}]'
               RunOrder: 1
-            - Name: SetupTraining
-              InputArtifacts:
-                - Name: BuildOutput
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Version: "1"
-                Provider: CloudFormation
-              Configuration:
-                ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
-                Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
-                StackName: sagemaker-custom-resource # Use global name to re-use across templates
-                TemplatePath: BuildOutput::template-custom-resource.yml
-              RunOrder: 2
         - Name: Train
           Actions:
-            - Name: CreateExperiment
-              InputArtifacts:
-                - Name: BuildOutput
+            - Name: RunWorkflow
               ActionTypeId:
                 Category: Invoke
                 Owner: AWS
-                Version: "1"
-                Provider: Lambda
+                Version: 1
+                Provider: StepFunctions
+              OutputArtifacts:
+                - Name: TrainWorkflow
               Configuration:
-                FunctionName: !Ref CreateExperiment
-                UserParameters: !Sub mlops-pipeline-${ModelName}
+                StateMachineArn: !GetAtt WorkflowPipeline.Arn
+                ExecutionNamePrefix: !Sub mlops-${ModelName}-
+                InputType: FilePath
+                Input: BuildOutput::workflow-input.json
               RunOrder: 1
-            - Name: TrainModel
-              InputArtifacts:
-                - Name: BuildOutput
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Version: "1"
-                Provider: CloudFormation
-              Configuration:
-                ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
-                StackName: !Sub ${ModelName}-training-job
-                TemplateConfiguration: BuildOutput::training-job.json
-                TemplatePath: BuildOutput::training-job.yml
-              RunOrder: 2
-            - Name: SuggestBaseline
-              InputArtifacts:
-                - Name: BuildOutput
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Version: "1"
-                Provider: CloudFormation
-              Configuration:
-                ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
-                StackName: !Sub ${ModelName}-suggest-baseline
-                TemplateConfiguration: BuildOutput::suggest-baseline.json
-                TemplatePath: BuildOutput::suggest-baseline.yml
-              RunOrder: 2
         - Name: DeployDev
           Actions:
             - Name: DeployModelDev
@@ -638,6 +530,7 @@ Resources:
                 iam:PassedToService: states.amazonaws.com
       Roles:
         - !Ref SageMakerRole
+        - !Ref PipelineRole
 
   CodePipelinePolicy:
     Type: AWS::IAM::Policy
@@ -688,6 +581,11 @@ Resources:
               - sagemaker:StopTransformJob
               - kms:CreateGrant
             Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/mlops-${ModelName}*
+          - Sid: AllowSageMakerSearch
+            Effect: Allow
+            Action:
+              - sagemaker:Search
+            Resource: "*"
       Roles:
         - !Ref SageMakerRole
         - !Ref WorkflowExecutionRole
@@ -883,7 +781,6 @@ Resources:
                   - lambda:AddPermission
                   - lambda:CreateFunction
                   - lambda:DeleteFunction
-                  - lambda:InvokeFunction # TODO: Remove
                 Resource: "*"
               - Sid: CodeBuild
                 Effect: Allow
