@@ -384,7 +384,7 @@ def main(
             "DataVersionId": data_verison_id,
             "BaselineJobName": "mlops-{}-pbl-{}".format(model_name, job_id),
             "BaselineOutputUri": output_data["BaselineOutputUri"],
-            "TrainingJobName": "mlops-{}-tj-{}".format(model_name, job_id),
+            "TrainingJobName": "mlops-{}-{}".format(model_name, job_id),
         }
         json.dump(workflow_inputs, f)
 

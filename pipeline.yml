@@ -598,7 +598,9 @@ Resources:
               - sagemaker:StopTrainingJob
               - sagemaker:StopTransformJob
               - kms:CreateGrant
-            Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/mlops-${ModelName}*
+            Resource:
+              - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/mlops-${ModelName}*
+              - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/model-monitoring-*
           - Sid: AllowSageMakerSearch
             Effect: Allow
             Action:
@@ -865,6 +867,11 @@ Resources:
                   - sagemaker:DescribeModel
                   - sagemaker:UpdateEndpointWeightsAndCapacities
                   - kms:CreateGrant
+                Resource: "*"
+              - Sid: AllowCloudWatch
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
                 Resource: "*"
               - Sid: ApiDeployment
                 Effect: Allow
