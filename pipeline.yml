@@ -29,6 +29,10 @@ Metadata:
           - GitHubBranch
           - GitHubUser
           - GitHubToken
+      - Label:
+          default: Optional Notification Settings
+        Parameters:
+          - EmailAddress
     ParameterLabels:
       ModelName:
         default: Model Name
@@ -44,6 +48,8 @@ Metadata:
         default: GitHub Username
       GitHubToken:
         default: GitHub Access Token
+      EmailAddress:
+        default: Email Address
 
 Parameters:
   ModelName:
@@ -83,11 +89,17 @@ Parameters:
     Type: String
     Description: Name of the branch the code is located
   GitHubToken:
+    Default: ""
     NoEcho: true
     Description: Github OAuthToken with access to Repo. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af. Go to https://github.com/settings/tokens
     Type: String
+  EmailAddress:
+    Default: ""
+    Description: Email address to notify on successful or failed deployment
+    Type: String
 
 Conditions:
+  EmailAddressNotEmpty: !Not [!Equals [!Ref EmailAddress, ""]]
   GitHubTokenEmpty: !Equals [!Ref GitHubToken, ""]
 
 Resources:
@@ -121,6 +133,19 @@ Resources:
       AccessControl: Private
       VersioningConfiguration:
         Status: Enabled
+
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub mlops-${ModelName}-notification
+
+  NotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: EmailAddressNotEmpty
+    Properties:
+      Endpoint: !Ref EmailAddress
+      Protocol: Email
+      TopicArn: !Ref NotificationTopic
 
   GitHubSecret:
     Type: AWS::SecretsManager::Secret
@@ -402,7 +427,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref BuildProject
                 PrimarySource: ModelSourceOutput
-                EnvironmentVariables: !Sub '[{"name":"SAGEMAKER_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"DEPLOY_ROLE_ARN","value":"${DeployRole.Arn}","type":"PLAINTEXT"},{"name":"SAGEMAKER_ROLE_ARN","value":"${SageMakerRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_LAMBDA","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_LAMBDA","value":"${SfnQueryTraining}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"SAGEMAKER_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"DEPLOY_ROLE_ARN","value":"${DeployRole.Arn}","type":"PLAINTEXT"},{"name":"SAGEMAKER_ROLE_ARN","value":"${SageMakerRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_LAMBDA","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_LAMBDA","value":"${SfnQueryTraining}","type":"PLAINTEXT"},{"name":"NOTIFICATION_ARN","value":"${NotificationTopic}","type":"PLAINTEXT"}]'
               RunOrder: 1
             - Name: SetupTraining
               InputArtifacts:

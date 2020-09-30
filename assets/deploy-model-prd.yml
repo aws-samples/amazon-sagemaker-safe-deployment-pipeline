@@ -25,6 +25,9 @@ Parameters:
   KmsKeyId:
     Description: AWS KMS key ID used to encrypt data at rest on the ML storage volume attached to endpoint config and S3 data capture.
     Type: String
+  NotificationArn:
+    Description: The arn for notification topic
+    Type: String
 
 Resources:
   Model:
@@ -73,11 +76,6 @@ Resources:
         - Key: Name
           Value: !Sub mlops-${ModelName}-prd-${TrainJobId}
 
-  DeploymentCompleteTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName: !Sub ${AWS::StackName}-deployment
-
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -104,7 +102,7 @@ Resources:
               - DeploymentSuccess
               - DeploymentFailure
             TriggerName: DeploymentCompleteTrigger
-            TriggerTargetArn: !Ref DeploymentCompleteTopic
+            TriggerTargetArn: !Ref NotificationArn
       Environment:
         Variables:
           ENDPOINT_NAME: !GetAtt Endpoint.EndpointName

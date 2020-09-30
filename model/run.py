@@ -249,12 +249,13 @@ def get_dev_params(model_name, job_id, role, image_uri, kms_key_id):
     }
 
 
-def get_prd_params(model_name, job_id, role, image_uri, kms_key_id):
+def get_prd_params(model_name, job_id, role, image_uri, kms_key_id, notification_arn):
     dev_params = get_dev_params(model_name, job_id, role, image_uri, kms_key_id)["Parameters"]
     prod_params = {
         "VariantName": "prd-{}".format(model_name),
         "ScheduleMetricName": "feature_baseline_drift_total_amount",
         "ScheduleMetricThreshold": str("0.20"),
+        "NotificationArn": notification_arn,
     }
     return {"Parameters": dict(dev_params, **prod_params)}
 
@@ -288,6 +289,7 @@ def main(
     workflow_pipeline_arn,
     create_experiment_function_name,
     query_training_function_name,
+    notification_arn,
 ):
     # Get the region
     region = boto3.Session().region_name
@@ -393,7 +395,9 @@ def main(
         params = get_dev_params(model_name, job_id, deploy_role, image_uri, kms_key_id)
         json.dump(params, f)
     with open(os.path.join(output_dir, "template-model-prd.json"), "w") as f:
-        params = get_prd_params(model_name, job_id, deploy_role, image_uri, kms_key_id)
+        params = get_prd_params(
+            model_name, job_id, deploy_role, image_uri, kms_key_id, notification_arn
+        )
         json.dump(params, f)
 
 
@@ -412,6 +416,7 @@ if __name__ == "__main__":
     parser.add_argument("--workflow-pipeline-arn", required=True)
     parser.add_argument("--create-experiment-function-name", required=True)
     parser.add_argument("--query-training-function-name", required=True)
+    parser.add_argument("--notification-arn", required=True)
     args = vars(parser.parse_args())
     print("args: {}".format(args))
     main(**args)
