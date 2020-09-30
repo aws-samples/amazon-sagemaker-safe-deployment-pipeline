@@ -74,7 +74,7 @@ Parameters:
     ConstraintDescription: Must select a valid notebook instance type.
   DatasetBucket:
     Default: nyc-tlc
-    Description: S3 dataset bucket
+    Description: S3 dataset bucket.
     Type: String
   GitHubUser:
     Default: aws-samples
@@ -83,19 +83,19 @@ Parameters:
   GitHubRepo:
     Default: amazon-sagemaker-safe-deployment-pipeline
     Type: String
-    Description: Name of the GitHub repository
+    Description: Name of the GitHub repository.
   GitHubBranch:
     Default: master
     Type: String
-    Description: Name of the branch the code is located
+    Description: Name of the GitHub branch where the code is located.
   GitHubToken:
     Default: ""
     NoEcho: true
-    Description: Github OAuthToken with access to Repo. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af. Go to https://github.com/settings/tokens
+    Description: Optional Github OAuthToken with access to your Repo.  Leave blank to pull the public repository into local CodeCommit.
     Type: String
   EmailAddress:
     Default: ""
-    Description: Email address to notify on successful or failed deployment
+    Description: Email address to notify on successful or failed deployments.
     Type: String
 
 Conditions:
