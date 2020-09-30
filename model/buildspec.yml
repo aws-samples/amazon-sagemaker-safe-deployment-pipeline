@@ -7,7 +7,6 @@ phases:
     commands:
       - echo "Installing requirements"
       - pip install -r $CODEBUILD_SRC_DIR/model/requirements.txt
-      - pip install git+https://github.com/brightsparc/aws-step-functions-data-science-sdk-python.git@sagemaker-v2 # SF v2
       - pip install crhelper -t $CODEBUILD_SRC_DIR/custom_resource # Install custom resource helper into the CFN directory
 
   pre_build:
