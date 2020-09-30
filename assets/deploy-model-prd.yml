@@ -136,6 +136,11 @@ Resources:
                 Action:
                   - sagemaker:InvokeEndpoint
                 Resource: "arn:aws:sagemaker:*:*:endpoint/mlops-*"
+              - Sid: AlowSNS
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref NotificationArn
             Version: "2012-10-17"
           PolicyName: SageMakerInvokeEndpoint
 
