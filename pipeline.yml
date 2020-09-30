@@ -510,10 +510,24 @@ Resources:
                 TemplatePath: BuildOutput::template-model-prd.yml
               RunOrder: 1
 
-  CloudWatchEventRule:
+  ScheduledRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: !Sub mlops-${ModelName}-retrain
+      Name: !Sub mlops-${ModelName}-schedule-pipeline
+      Description: ScheduledRule
+      ScheduleExpression: "cron(0 12 1 * ? *)" # 1 day of month
+      State: DISABLED
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+        - Arn: !Ref NotificationTopic
+          Id: "SchedulePipeline"
+
+  RetrainRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub mlops-${ModelName}-retrain-pipeline
       EventPattern:
         source:
           - aws.cloudwatch
@@ -529,6 +543,8 @@ Resources:
         - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
           RoleArn: !GetAtt CloudWatchEventRole.Arn
           Id: !Sub codepipeline-${DeployPipeline}
+        - Arn: !Ref NotificationTopic
+          Id: "RetrainPipeline"
 
   CodeCommitPolicy:
     Type: AWS::IAM::Policy
