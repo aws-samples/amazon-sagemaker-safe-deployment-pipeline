@@ -766,6 +766,15 @@ Resources:
                   - cloudwatch:DeleteDashboards
                   - iam:GetRole
                 Resource: "*"
+              - Sid: AllowCanaryPassRole # TODO: Move this to CFN resource
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService:
+                      - lambda.amazonaws.com
 
   WorkflowExecutionRole:
     Type: AWS::IAM::Role
