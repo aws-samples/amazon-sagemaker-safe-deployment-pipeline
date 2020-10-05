@@ -9,10 +9,10 @@ Parameters:
   TrainJobId:
     Type: String
     Description: Id of the Codepipeline + SagemakerJobs
-  MLOpsRoleArn:
+  DeployRoleArn:
     Type: String
     Description: The role for executing the deployment
-  VariantName:
+  ModelVariant:
     Type: String
     Description: Name of the endpoint variant
   KmsKeyId:
@@ -27,7 +27,7 @@ Resources:
       PrimaryContainer:
         Image: !Ref ImageRepoUri
         ModelDataUrl: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/mlops-${ModelName}-${TrainJobId}/output/model.tar.gz
-      ExecutionRoleArn: !Ref MLOpsRoleArn
+      ExecutionRoleArn: !Ref DeployRoleArn
 
   EndpointConfig:
     Type: "AWS::SageMaker::EndpointConfig"
@@ -37,7 +37,7 @@ Resources:
           InitialVariantWeight: 1.0
           InstanceType: ml.t2.medium
           ModelName: !GetAtt Model.ModelName
-          VariantName: !Ref VariantName
+          VariantName: !Sub ${ModelVariant}-${ModelName}
       EndpointConfigName: !Sub mlops-${ModelName}-dec-${TrainJobId}
       KmsKeyId: !Ref KmsKeyId
       Tags:

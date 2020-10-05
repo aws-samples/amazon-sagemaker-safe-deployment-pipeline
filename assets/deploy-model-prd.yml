@@ -10,12 +10,12 @@ Parameters:
   TrainJobId:
     Type: String
     Description: Id of the Codepipeline + SagemakerJobs
-  MLOpsRoleArn:
+  DeployRoleArn:
     Type: String
     Description: The role for executing the deployment
-  VariantName:
+  ModelVariant:
     Type: String
-    Description: Name of the endpoint variant
+    Description: Name of the model variant
   ScheduleMetricName:
     Type: String
     Description: The metric to alarm on for schedule
@@ -37,7 +37,7 @@ Resources:
       PrimaryContainer:
         Image: !Ref ImageRepoUri
         ModelDataUrl: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/mlops-${ModelName}-${TrainJobId}/output/model.tar.gz
-      ExecutionRoleArn: !Ref MLOpsRoleArn
+      ExecutionRoleArn: !Ref DeployRoleArn
 
   EndpointConfig:
     Type: "AWS::SageMaker::EndpointConfig"
@@ -47,7 +47,7 @@ Resources:
           InitialVariantWeight: 1.0
           InstanceType: ml.m5.large
           ModelName: !GetAtt Model.ModelName
-          VariantName: !Ref VariantName
+          VariantName: !Sub ${ModelVariant}-${ModelName}
       DataCaptureConfig:
         CaptureContentTypeHeader:
           CsvContentTypes:
@@ -218,7 +218,7 @@ Resources:
       BaselineConstraintsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/constraints.json
       BaselineStatisticsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/statistics.json
       OutputS3URI: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/reports
-      PassRoleArn: !Ref MLOpsRoleArn
+      PassRoleArn: !Ref DeployRoleArn
 
   SagemakerScheduleAlarm:
     Type: "AWS::CloudWatch::Alarm"
@@ -281,7 +281,7 @@ Resources:
     Properties:
       MaxCapacity: 10
       MinCapacity: 2
-      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${VariantName}
+      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
       RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
@@ -292,7 +292,7 @@ Resources:
     Properties:
       PolicyName: SageMakerVariantInvocationsPerInstance
       PolicyType: TargetTrackingScaling
-      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${VariantName}
+      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
       TargetTrackingScalingPolicyConfiguration:

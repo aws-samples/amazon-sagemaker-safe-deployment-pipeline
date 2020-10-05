@@ -242,8 +242,8 @@ def get_dev_params(model_name, job_id, role, image_uri, kms_key_id):
             "ImageRepoUri": image_uri,
             "ModelName": model_name,
             "TrainJobId": job_id,
-            "MLOpsRoleArn": role,
-            "VariantName": "dev-{}".format(model_name),
+            "DeployRoleArn": role,
+            "ModelVariant": "dev",
             "KmsKeyId": kms_key_id,
         }
     }
@@ -252,7 +252,7 @@ def get_dev_params(model_name, job_id, role, image_uri, kms_key_id):
 def get_prd_params(model_name, job_id, role, image_uri, kms_key_id, notification_arn):
     dev_params = get_dev_params(model_name, job_id, role, image_uri, kms_key_id)["Parameters"]
     prod_params = {
-        "VariantName": "prd-{}".format(model_name),
+        "ModelVariant": "prd",
         "ScheduleMetricName": "feature_baseline_drift_total_amount",
         "ScheduleMetricThreshold": str("0.20"),
         "NotificationArn": notification_arn,

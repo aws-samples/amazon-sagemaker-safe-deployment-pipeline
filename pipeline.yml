@@ -236,6 +236,37 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        EnvironmentVariables:
+          - Name: MODEL_NAME
+            Type: PLAINTEXT
+            Value: !Ref ModelName
+          - Name: ARTIFACT_BUCKET
+            Type: PLAINTEXT
+            Value: !Ref ArtifactBucket
+          - Name: KMS_KEY_ID
+            Type: PLAINTEXT
+            Value: !Ref KMSKey
+          - Name: DEPLOY_ROLE_ARN
+            Type: PLAINTEXT
+            Value: !GetAtt DeployRole.Arn
+          - Name: NOTIFICATION_ARN
+            Type: PLAINTEXT
+            Value: !Ref NotificationTopic
+          - Name: SAGEMAKER_ROLE_ARN
+            Type: PLAINTEXT
+            Value: !GetAtt SageMakerRole.Arn
+          - Name: SAGEMAKER_BUCKET
+            Type: PLAINTEXT
+            Value: !Sub "sagemaker-${AWS::Region}-${AWS::AccountId}"
+          - Name: WORKFLOW_PIPELINE_ARN
+            Type: PLAINTEXT
+            Value: !GetAtt WorkflowPipeline.Arn
+          - Name: CREATE_EXPERIMENT_LAMBDA
+            Type: PLAINTEXT
+            Value: !Ref SfnCreateExperiment
+          - Name: QUERY_TRAINING_LAMBDA
+            Type: PLAINTEXT
+            Value: !Ref SfnQueryTraining
       Source:
         Type: CODEPIPELINE
         BuildSpec: model/buildspec.yml
@@ -427,7 +458,6 @@ Resources:
               Configuration:
                 ProjectName: !Ref BuildProject
                 PrimarySource: ModelSourceOutput
-                EnvironmentVariables: !Sub '[{"name":"SAGEMAKER_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"DEPLOY_ROLE_ARN","value":"${DeployRole.Arn}","type":"PLAINTEXT"},{"name":"SAGEMAKER_ROLE_ARN","value":"${SageMakerRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"},{"name":"WORKFLOW_PIPELINE_ARN","value":"${WorkflowPipeline.Arn}","type":"PLAINTEXT"},{"name":"CREATE_EXPERIMENT_LAMBDA","value":"${SfnCreateExperiment}","type":"PLAINTEXT"},{"name":"QUERY_TRAINING_LAMBDA","value":"${SfnQueryTraining}","type":"PLAINTEXT"},{"name":"NOTIFICATION_ARN","value":"${NotificationTopic}","type":"PLAINTEXT"}]'
               RunOrder: 1
             - Name: SetupTraining
               InputArtifacts:
@@ -458,7 +488,6 @@ Resources:
                 - Name: TrainWorkflow
               Configuration:
                 StateMachineArn: !GetAtt WorkflowPipeline.Arn
-                ExecutionNamePrefix: !Sub mlops-${ModelName}-
                 InputType: FilePath
                 Input: workflow-input.json
               RunOrder: 1
@@ -766,7 +795,7 @@ Resources:
                   - cloudwatch:DeleteDashboards
                   - iam:GetRole
                 Resource: "*"
-              - Sid: AllowCanaryPassRole # TODO: Move this to CFN resource
+              - Sid: AllowCanaryPassRole
                 Effect: Allow
                 Action:
                   - iam:PassRole
