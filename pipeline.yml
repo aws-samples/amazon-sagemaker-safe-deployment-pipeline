@@ -211,8 +211,6 @@ Resources:
                 echo "export PIPELINE_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
                 echo "export MODEL_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
                 echo "export WORKFLOW_PIPELINE_ARN=${WorkflowPipeline.Arn}" >> /etc/profile.d/jupyter-env.sh
-                echo "export CREATE_EXPERIMENT_LAMBDA=${SfnCreateExperiment}" >> /etc/profile.d/jupyter-env.sh
-                echo "export QUERY_TRAINING_LAMBDA=${SfnQueryTraining}" >> /etc/profile.d/jupyter-env.sh
 
   NotebookInstance:
     Type: AWS::SageMaker::NotebookInstance
@@ -261,115 +259,10 @@ Resources:
           - Name: WORKFLOW_PIPELINE_ARN
             Type: PLAINTEXT
             Value: !GetAtt WorkflowPipeline.Arn
-          - Name: CREATE_EXPERIMENT_LAMBDA
-            Type: PLAINTEXT
-            Value: !Ref SfnCreateExperiment
-          - Name: QUERY_TRAINING_LAMBDA
-            Type: PLAINTEXT
-            Value: !Ref SfnQueryTraining
       Source:
         Type: CODEPIPELINE
         BuildSpec: model/buildspec.yml
       TimeoutInMinutes: 30
-
-  SfnCreateExperiment:
-    Type: "AWS::Lambda::Function"
-    Properties:
-      FunctionName: !Sub ${ModelName}-sfn-create-experiment
-      Handler: index.lambda_handler
-      MemorySize: 512
-      Role: !GetAtt SageMakerRole.Arn
-      Runtime: python3.6
-      Timeout: 60
-      Code:
-        ZipFile: |
-          import boto3
-          from botocore.exceptions import ClientError
-          import logging
-          import json
-
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
-          sm_client = boto3.client('sagemaker')
-
-          def lambda_handler(event, context):
-              if ('ExperimentName' in event):
-                  experiment_name = event['ExperimentName']
-              else:
-                  raise KeyError('ExperimentName key not found in input: {}'.format(json.dumps(event)))
-              if ('TrialName' in event):
-                  trial_name = event['TrialName']
-              else:
-                  raise KeyError('TrialName key not found in input: {}'.format(json.dumps(event)))
-              experiment_created = False
-              try:
-                  response = sm_client.create_experiment(ExperimentName=experiment_name)
-                  logger.info("Created experiment: {}".format(experiment_name))
-                  experiment_created = True
-              except ClientError as error:
-                  if error.response['Error']['Code'] == 'ValidationException' and \
-                      'Experiment names must be unique' in error.response['Error']['Message']:
-                      logger.warn('Attempt to create duplicate experiment: {}'.format(experiment_name))
-                  else:
-                      raise error
-              trial_created = False
-              try:
-                  response = sm_client.create_trial(ExperimentName=experiment_name, TrialName=trial_name)
-                  logger.info("Created trial: {}".format(trial_name))
-                  experiment_created = True
-              except ClientError as error:
-                  if error.response['Error']['Code'] == 'ValidationException' and \
-                      'Trial names must be unique' in error.response['Error']['Message']:
-                      logger.warn('Attempt to create duplicate trial: {}'.format(trial_name))
-                  else:
-                      raise error
-              return {
-                  'statusCode': 200,
-                  'results': {
-                      'ExperimentCreated': experiment_created,
-                      'TrialCreated': trial_created,
-                  }
-              }
-      Description: "Create SageMaker Experiment and Trial"
-
-  SfnQueryTraining:
-    Type: "AWS::Lambda::Function"
-    Properties:
-      FunctionName: !Sub ${ModelName}-sfn-query-training
-      Handler: index.lambda_handler
-      MemorySize: 512
-      Role: !GetAtt SageMakerRole.Arn
-      Runtime: python3.6
-      Timeout: 60
-      Code:
-        ZipFile: |
-          import boto3
-          import logging
-          import json
-
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
-          sm_client = boto3.client('sagemaker')
-
-          def lambda_handler(event, context):
-              if ('TrainingJobName' in event):
-                  job_name = event['TrainingJobName']
-              else:
-                  raise KeyError('TrainingJobName not found for event: {}.'.format(json.dumps(event)))
-              response = sm_client.describe_training_job(TrainingJobName=job_name)
-              status = response['TrainingJobStatus']
-              logger.info("Training job:{} has status:{}.".format(job_name, status))
-              for index, metric in enumerate(response['FinalMetricDataList']):
-                  metric['Timestamp'] = metric['Timestamp'].timestamp()
-              return {
-                  'statusCode': 200,
-                  'results': {
-                      'TrainingJobName': job_name,
-                      'TrainingJobStatus': status,
-                      'TrainingMetrics': response['FinalMetricDataList']
-                  }
-              }
-      Description: "Query Training Metrics"
 
   WorkflowPipeline:
     Type: AWS::StepFunctions::StateMachine
@@ -829,8 +722,7 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource:
-                  - !GetAtt SfnCreateExperiment.Arn
-                  - !GetAtt SfnQueryTraining.Arn
+                  - arn:aws:lambda:*:*:function:mlops-*
               - Sid: AllowEvents
                 Effect: Allow
                 Action:

@@ -287,10 +287,12 @@ def main(
     ecr_dir,
     kms_key_id,
     workflow_pipeline_arn,
-    create_experiment_function_name,
-    query_training_function_name,
     notification_arn,
 ):
+    # Define the function names
+    create_experiment_function_name = "mlops-create-experiment"
+    query_training_function_name = "mlops-query-training"
+
     # Get the region
     region = boto3.Session().region_name
     print("region: {}".format(region))
@@ -414,8 +416,6 @@ if __name__ == "__main__":
     parser.add_argument("--kms-key-id", required=True)
     parser.add_argument("--git-branch", required=True)
     parser.add_argument("--workflow-pipeline-arn", required=True)
-    parser.add_argument("--create-experiment-function-name", required=True)
-    parser.add_argument("--query-training-function-name", required=True)
     parser.add_argument("--notification-arn", required=True)
     args = vars(parser.parse_args())
     print("args: {}".format(args))
