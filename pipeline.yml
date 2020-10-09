@@ -258,7 +258,7 @@ Resources:
             Value: !Sub "sagemaker-${AWS::Region}-${AWS::AccountId}"
           - Name: WORKFLOW_PIPELINE_ARN
             Type: PLAINTEXT
-            Value: !GetAtt WorkflowPipeline.Arn
+            Value: !Ref WorkflowPipeline
       Source:
         Type: CODEPIPELINE
         BuildSpec: model/buildspec.yml
@@ -380,7 +380,7 @@ Resources:
               OutputArtifacts:
                 - Name: TrainWorkflow
               Configuration:
-                StateMachineArn: !GetAtt WorkflowPipeline.Arn
+                StateMachineArn: !Ref WorkflowPipeline
                 InputType: FilePath
                 Input: workflow-input.json
               RunOrder: 1
@@ -567,6 +567,7 @@ Resources:
           - Sid: AllowSageMakerSearch
             Effect: Allow
             Action:
+              - sagemaker:ListMonitoringExecutions
               - sagemaker:Search
             Resource: "*"
       Roles:
@@ -890,6 +891,6 @@ Outputs:
   DeployPipeline:
     Description: The deployment pipeline
     Value: !Ref DeployPipeline
-  WorkflowPipeline:
-    Description: The workflow code pipeline
-    Value: !Ref WorkflowPipeline
+  NotebookInstance:
+    Description: The sagemaker notebook
+    Value: !Ref NotebookInstance
