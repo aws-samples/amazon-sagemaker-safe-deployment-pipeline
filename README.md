@@ -118,11 +118,25 @@ This project is written in Python, and design to be customized for your own mode
 │   ├── app.py
 │   ├── post_traffic_hook.py
 │   └── pre_traffic_hook.py
+├── assets
+│   ├── deploy-model-dev.yml
+│   ├── deploy-model-prod.yml
+│   ├── suggest-baseline.yml
+│   └── training-job.yml
+├── custom_resource
+|   ├── __init__.py
+|   ├── sagemaker_monitoring_schedule.py
+|   ├── sagemaker_suggest_baseline.py
+|   ├── sagemaker_training_job.py
+│   └── sagemaker-custom-resource.yml
 ├── model
 │   ├── buildspec.yml
+│   ├── dashboard.json
 │   ├── requirements.txt
 │   └── run.py
 ├── notebook
+│   ├── canary.js
+│   ├── dashboard.json
 │   └── mlops.ipynb
 └── pipeline.yml
 ```
