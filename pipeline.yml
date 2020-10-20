@@ -164,7 +164,7 @@ Resources:
   SageMakerCodeRepository:
     Type: AWS::SageMaker::CodeRepository
     Properties:
-      CodeRepositoryName: !Ref GitHubRepo
+      CodeRepositoryName: !Join [ "-",  !Split [ "_" , !Ref GitHubRepo ] ]
       GitConfig:
         RepositoryUrl:
           Fn::If:
