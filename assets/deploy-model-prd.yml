@@ -151,6 +151,7 @@ Resources:
       CodeUri: ../api
       Handler: pre_traffic_hook.lambda_handler
       Runtime: python3.7
+      Timeout: 30
       KmsKeyArn: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}
       Policies:
         - Version: "2012-10-17"
@@ -182,6 +183,7 @@ Resources:
       CodeUri: ../api
       Handler: post_traffic_hook.lambda_handler
       Runtime: python3.7
+      Timeout: 30
       KmsKeyArn: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}
       Policies:
         - Version: "2012-10-17"
