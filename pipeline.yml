@@ -545,6 +545,7 @@ Resources:
               - sagemaker:CreateProcessingJob
               - sagemaker:CreateTrainingJob
               - sagemaker:CreateTransformJob
+              - sagemaker:DeleteMonitoringSchedule
               - sagemaker:DescribeTrainingJob
               - sagemaker:DescribeHyperParameterTuningJob
               - sagemaker:DescribeEndpoint
@@ -568,6 +569,7 @@ Resources:
             Effect: Allow
             Action:
               - sagemaker:ListMonitoringExecutions
+              - sagemaker:ListMonitoringSchedules
               - sagemaker:Search
             Resource: "*"
       Roles:
