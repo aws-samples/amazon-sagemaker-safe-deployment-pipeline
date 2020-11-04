@@ -139,6 +139,21 @@ Resources:
     Properties:
       TopicName: !Sub mlops-${ModelName}-notification
 
+  NotificationTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AllowCloudWatchEvents
+          Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sns:Publish
+          Resource: !Ref NotificationTopic
+      Topics:
+        - !Ref NotificationTopic
+
   NotificationSubscription:
     Type: AWS::SNS::Subscription
     Condition: EmailAddressNotEmpty
@@ -235,6 +250,9 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
         EnvironmentVariables:
+          - Name: GIT_BRANCH
+            Type: PLAINTEXT
+            Value: !Ref GitHubBranch
           - Name: MODEL_NAME
             Type: PLAINTEXT
             Value: !Ref ModelName
