@@ -164,7 +164,7 @@ Resources:
   SageMakerCodeRepository:
     Type: AWS::SageMaker::CodeRepository
     Properties:
-      CodeRepositoryName: !Join [ "-",  !Split [ "_" , !Ref GitHubRepo ] ]
+      CodeRepositoryName: !Join ["-", !Split ["_", !Ref GitHubRepo]]
       GitConfig:
         RepositoryUrl:
           Fn::If:
@@ -306,6 +306,7 @@ Resources:
                     Version: "1"
                     Provider: CodeCommit
                   Configuration:
+                    PollForSourceChanges: false # Triggered by CodeCommitEventRule
                     RepositoryName: !Ref GitHubRepo
                     BranchName: !Ref GitHubBranch
                   OutputArtifacts:
@@ -315,7 +316,7 @@ Resources:
                     Category: Source
                     Owner: ThirdParty
                     Version: "1"
-                    Provider: GitHub
+                    Provider: GitHub # Explore CodeStarSourceConnection: https://docs.aws.amazon.com/codepipeline/latest/userguide/update-github-action-connections.html
                   OutputArtifacts:
                     - Name: ModelSourceOutput
                   Configuration:
@@ -332,8 +333,10 @@ Resources:
               OutputArtifacts:
                 - Name: DataSourceOutput
               Configuration:
+                PollForSourceChanges: false # Triggered by S3EventRule
                 S3Bucket: !Ref ArtifactBucket
                 S3ObjectKey: !Sub ${ModelName}/data-source.zip
+                PollForSourceChanges: false
               RunOrder: 1
         - Name: Build
           Actions:
@@ -432,24 +435,63 @@ Resources:
                 TemplatePath: BuildOutput::template-model-prd.yml
               RunOrder: 1
 
-  ScheduledRule:
+  CodeCommitEventRule:
     Type: AWS::Events::Rule
+    Condition: GitHubTokenEmpty
     Properties:
-      Name: !Sub mlops-${ModelName}-schedule-pipeline
-      Description: ScheduledRule
-      ScheduleExpression: "cron(0 12 1 * ? *)" # 1 day of month
-      State: DISABLED
+      Name: !Sub mlops-${ModelName}-codecommit-pipeline
+      Description: "AWS CodeCommit change to trigger AWS Code Pipeline"
+      EventPattern:
+        source:
+          - "aws.codecommit"
+        detail-type:
+          - "CodeCommit Repository State Change"
+        resources:
+          - !GetAtt CodeCommitRepository.Arn
+        detail:
+          referenceType:
+            - "branch"
+          referenceName:
+            - !Ref GitHubBranch
       Targets:
         - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
           RoleArn: !GetAtt CloudWatchEventRole.Arn
           Id: !Sub codepipeline-${DeployPipeline}
         - Arn: !Ref NotificationTopic
-          Id: "SchedulePipeline"
+          Id: "CodeCommitRule"
+
+  S3EventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventSource:
+            - s3.amazonaws.com
+          eventName:
+            - CopyObject
+            - PutObject
+            - CompleteMultipartUpload
+          requestParameters:
+            bucketName:
+              - !Ref ArtifactBucket
+            key:
+              - !Sub ${ModelName}/data-source.zip
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+        - Arn: !Ref NotificationTopic
+          Id: "CodeCommitRule"
 
   RetrainRule:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub mlops-${ModelName}-retrain-pipeline
+      Description: "Retrain rule for the AWS Code Pipeline"
       EventPattern:
         source:
           - aws.cloudwatch
@@ -466,7 +508,21 @@ Resources:
           RoleArn: !GetAtt CloudWatchEventRole.Arn
           Id: !Sub codepipeline-${DeployPipeline}
         - Arn: !Ref NotificationTopic
-          Id: "RetrainPipeline"
+          Id: "RetrainRule"
+
+  ScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub mlops-${ModelName}-schedule-pipeline
+      Description: "Scheduled rule for the AWS Code Pipeline"
+      ScheduleExpression: "cron(0 12 1 * ? *)" # 1 day of month
+      State: DISABLED # Disable by default
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+        - Arn: !Ref NotificationTopic
+          Id: "ScheduleRule"
 
   CodeCommitPolicy:
     Type: AWS::IAM::Policy
@@ -674,10 +730,10 @@ Resources:
               - Sid: AllowCloudFormation
                 Effect: Allow
                 Action:
-                  - cloudformation:DescribeStacks
-                  - cloudformation:DescribeStackEvents
+                  - cloudformation:*
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ModelName}*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/sagemaker-custom-resource
               - Sid: AllowCloudWatch
                 Effect: Allow
                 Action:

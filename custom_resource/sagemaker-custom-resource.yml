@@ -93,6 +93,11 @@ Resources:
                   - kms:CreateGrant # Required if KmsKeyIdf specified
                 Resource:
                   - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/*
+              - Sid: AllowSageMakerSearch
+                Effect: Allow
+                Action:
+                  - sagemaker:ListMonitoringExecutions
+                Resource: "*" # Allow all resources
               - Sid: S3Resources
                 Effect: Allow
                 Action:
