@@ -216,7 +216,7 @@ Resources:
     Properties:
       ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sagemaker-cfn-monitoring-schedule"
       EndpointName: !GetAtt Endpoint.EndpointName
-      ScheduleName: !Sub mlops-${ModelName}-pms-${TrainJobId}
+      ScheduleName: !Sub mlops-${ModelName}-pms
       BaselineConstraintsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/constraints.json
       BaselineStatisticsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/statistics.json
       OutputS3URI: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/reports
