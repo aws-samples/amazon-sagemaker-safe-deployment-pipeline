@@ -373,7 +373,7 @@ Resources:
                 ProjectName: !Ref BuildProject
                 PrimarySource: ModelSourceOutput
               RunOrder: 1
-            - Name: SetupTraining
+            - Name: CustomResources
               InputArtifacts:
                 - Name: BuildOutput
               ActionTypeId:
@@ -751,7 +751,6 @@ Resources:
                   - cloudformation:*
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ModelName}*
-                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/sagemaker-custom-resource
               - Sid: AllowCloudWatch
                 Effect: Allow
                 Action:
