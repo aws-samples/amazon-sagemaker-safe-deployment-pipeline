@@ -85,6 +85,7 @@ Resources:
                   - sagemaker:DeleteEndpointConfig
                   - sagemaker:CreateMonitoringSchedule
                   - sagemaker:ListMonitoringExecutions
+                  - sagemaker:UpdateMonitoringSchedule
                   - sagemaker:DeleteMonitoringSchedule
                   - sagemaker:DescribeMonitoringSchedule
                   - sagemaker:DescribeProcessingJob

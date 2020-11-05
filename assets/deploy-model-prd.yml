@@ -233,11 +233,12 @@ Resources:
           Value: !GetAtt Endpoint.EndpointName
         - Name: MonitoringSchedule
           Value: !GetAtt SagemakerMonitoringSchedule.ScheduleName
-      EvaluationPeriods: 2
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
       MetricName: !Ref ScheduleMetricName
       Namespace: aws/sagemaker/Endpoints/data-metrics
       Period: 60
-      Statistic: Sum
+      Statistic: Average
       Threshold: !Ref ScheduleMetricThreshold
 
   AliasErrorMetricGreaterThanZeroAlarm:
