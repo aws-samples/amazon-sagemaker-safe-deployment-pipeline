@@ -502,8 +502,6 @@ Resources:
         - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
           RoleArn: !GetAtt CloudWatchEventRole.Arn
           Id: !Sub codepipeline-${DeployPipeline}
-        - Arn: !Ref NotificationTopic
-          Id: "CodeCommitRule"
 
   RetrainRule:
     Type: AWS::Events::Rule
@@ -527,6 +525,13 @@ Resources:
           Id: !Sub codepipeline-${DeployPipeline}
         - Arn: !Ref NotificationTopic
           Id: "RetrainRule"
+          InputTransformer:
+            InputPathsMap:
+                alarmName: $.detail.alarmName
+                reason: $.detail.state.reason
+            InputTemplate: |
+                "The retrain rule for alarm: <alarmName> has been triggered."
+                "Reason: <reason>."
 
   ScheduledRule:
     Type: AWS::Events::Rule
@@ -541,6 +546,9 @@ Resources:
           Id: !Sub codepipeline-${DeployPipeline}
         - Arn: !Ref NotificationTopic
           Id: "ScheduleRule"
+          InputTransformer:
+            InputTemplate: |
+                "The schedule rule has been triggered."
 
   CodeCommitPolicy:
     Type: AWS::IAM::Policy
@@ -658,16 +666,21 @@ Resources:
           - Sid: S3Resources
             Effect: Allow
             Action:
-              - s3:CreateBucket
               - s3:GetBucket*
               - s3:GetObject*
-              - s3:ListBucket
               - s3:PutObject
             Resource:
               - !Sub arn:aws:s3:::${DatasetBucket}/*
               - !Sub arn:aws:s3:::${ArtifactBucket}/*
               - !Sub arn:aws:s3:::${ArtifactBucket}
               - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}/*
+              - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}
+          - Sid: S3Bucket
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:ListBucket
+            Resource:
               - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}
           - Sid: AllowKms
             Effect: Allow

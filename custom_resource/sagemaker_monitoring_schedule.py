@@ -56,15 +56,29 @@ def delete_handler(event, context):
 
 
 @helper.poll_create
-@helper.poll_update
 def poll_create(event, context):
     """
-    Return true if the resource has been created and false otherwise so
+    Return physical resource if the resource has been created and false otherwise so
     CloudFormation polls again.
     """
     schedule_name = get_schedule_name(event)
     logger.info("Polling for creation of schedule: %s", schedule_name)
-    return is_schedule_ready(schedule_name)
+    if is_schedule_ready(schedule_name):
+        return event["CrHelperData"]["PhysicalResourceId"]
+    return False
+
+
+@helper.poll_update
+def poll_update(event, context):
+    """
+    Return physical resource if the resource has been updated and false otherwise so
+    CloudFormation polls again.
+    """
+    schedule_name = get_schedule_name(event)
+    logger.info("Polling for updation of schedule: %s", schedule_name)
+    if is_schedule_ready(schedule_name):
+        return event["CrHelperData"]["PhysicalResourceId"]
+    return False
 
 
 @helper.poll_delete
@@ -154,7 +168,7 @@ def update_monitoring_schedule(event):
         return helper.Data["Arn"]
     except ClientError as e:
         if e.response["Error"]["Code"] == "ValidationException":
-            logger.error("Unable to create schedule: %s", e.response["Error"]["Message"])
+            logger.error("Unable to update schedule: %s", e.response["Error"]["Message"])
         else:
             logger.error("Unexpected error while trying to delete monitoring schedule")
         raise e
@@ -176,6 +190,17 @@ def is_schedule_ready(schedule_name):
         raise Exception(
             "Monitoring schedule ({}) has unexpected status: {}".format(schedule_name, status)
         )
+
+    # Check if we have running schedule excutions before deleting schedule
+    response = sm.list_monitoring_executions(MonitoringScheduleName=schedule_name)
+    running = [
+        m["MonitoringExecutionStatus"]
+        for m in response["MonitoringExecutionSummaries"]
+        if m["MonitoringExecutionStatus"] in ["Pending", "InProgress", "Stopping"]
+    ]
+    if running:
+        logger.info("You still have %d executions: %s", len(running), ",".join(running))
+        is_ready = False
 
     return is_ready
 
@@ -255,17 +280,7 @@ def create_monitoring_schedule_config(event):
 def delete_monitoring_schedule(schedule_name):
     try:
         if is_schedule_ready(schedule_name):
-            # Check if we have running schedule excutions before deleting schedule
-            response = sm.list_monitoring_executions(MonitoringScheduleName=schedule_name)
-            running = [
-                m["MonitoringExecutionStatus"]
-                for m in response["MonitoringExecutionSummaries"]
-                if m["MonitoringExecutionStatus"] in ["Pending", "InProgress", "Stopping"]
-            ]
-            if running:
-                logger.info("You still have %d executions: %s", len(running), ",".join(running))
-            else:
-                sm.delete_monitoring_schedule(MonitoringScheduleName=schedule_name)
+            sm.delete_monitoring_schedule(MonitoringScheduleName=schedule_name)
     except ClientError as e:
         if e.response["Error"]["Code"] == "ResourceNotFound":
             logger.info("Resource not found, nothing to delete")
