@@ -216,7 +216,7 @@ Resources:
     Properties:
       ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sagemaker-cfn-monitoring-schedule"
       EndpointName: !GetAtt Endpoint.EndpointName
-      ScheduleName: !Sub mlops-${ModelName}-pms-${TrainJobId}
+      ScheduleName: !Sub mlops-${ModelName}-pms
       BaselineConstraintsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/constraints.json
       BaselineStatisticsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/statistics.json
       OutputS3URI: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/reports
@@ -233,11 +233,12 @@ Resources:
           Value: !GetAtt Endpoint.EndpointName
         - Name: MonitoringSchedule
           Value: !GetAtt SagemakerMonitoringSchedule.ScheduleName
-      EvaluationPeriods: 2
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
       MetricName: !Ref ScheduleMetricName
       Namespace: aws/sagemaker/Endpoints/data-metrics
       Period: 60
-      Statistic: Sum
+      Statistic: Average
       Threshold: !Ref ScheduleMetricThreshold
 
   AliasErrorMetricGreaterThanZeroAlarm:

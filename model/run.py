@@ -260,23 +260,33 @@ def get_prd_params(model_name, job_id, role, image_uri, kms_key_id, notification
     return {"Parameters": dict(dev_params, **prod_params)}
 
 
-def get_pipeline_revision(pipeline_name):
-    # Get pipeline execution id
+def get_pipeline_execution_id(pipeline_name, codebuild_id):
     codepipeline = boto3.client("codepipeline")
     response = codepipeline.get_pipeline_state(name=pipeline_name)
-    # Get the GitSource and DataSource and JobId
-    rev = dict(
-        [
-            (r["actionName"], r["currentRevision"]["revisionId"])
-            for r in response["stageStates"][0]["actionStates"]
-        ]
+    for stage in response["stageStates"]:
+        for action in stage["actionStates"]:
+            # Return the matching stage with the same external id
+            if (
+                "latestExecution" in action
+                and "externalExecutionId" in action["latestExecution"]
+                and action["latestExecution"]["externalExecutionId"] == codebuild_id
+            ):
+                return stage["latestExecution"]["pipelineExecutionId"]
+
+
+def get_pipeline_revisions(pipeline_name, execution_id):
+    codepipeline = boto3.client("codepipeline")
+    response = codepipeline.get_pipeline_execution(
+        pipelineName=pipeline_name, pipelineExecutionId=execution_id
     )
-    rev["JobId"] = response["stageStates"][0]["latestExecution"]["pipelineExecutionId"]
-    return rev
+    return dict(
+        (r["name"], r["revisionId"]) for r in response["pipelineExecution"]["artifactRevisions"]
+    )
 
 
 def main(
     git_branch,
+    codebuild_id,
     pipeline_name,
     model_name,
     deploy_role,
@@ -313,10 +323,10 @@ def main(
         print("baseline uri: {}".format(input_data["BaselineUri"]))
 
     # Get the job id and source revisions
-    revision = get_pipeline_revision(pipeline_name)
-    job_id = revision["JobId"]
-    git_commit_id = revision["GitSource"]
-    data_verison_id = revision["DataSource"]
+    job_id = get_pipeline_execution_id(pipeline_name, codebuild_id)
+    revisions = get_pipeline_revisions(pipeline_name, job_id)
+    git_commit_id = revisions["ModelSourceOutput"]
+    data_verison_id = revisions["DataSourceOutput"]
     print("job id: {}".format(job_id))
     print("git commit: {}".format(git_commit_id))
     print("data version: {}".format(data_verison_id))
@@ -405,6 +415,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Load parameters")
+    parser.add_argument("--codebuild-id", required=True)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--ecr-dir", required=False)
