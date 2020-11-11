@@ -763,6 +763,7 @@ Resources:
                   - cloudformation:*
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ModelName}*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/sagemaker-custom-resource*
               - Sid: AllowCloudWatch
                 Effect: Allow
                 Action:
