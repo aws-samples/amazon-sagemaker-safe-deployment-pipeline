@@ -296,7 +296,7 @@ def main(
     output_dir,
     ecr_dir,
     kms_key_id,
-    workflow_pipeline_arn,
+    workflow_role_arn,
     notification_arn,
 ):
     # Define the function names
@@ -373,12 +373,11 @@ def main(
         region,
         sagemaker_role,
     )
-    workflow_graph = create_graph(experiment_step, baseline_step, training_step)
+    workflow_definition = create_graph(experiment_step, baseline_step, training_step)
 
-    # Update the workflow
-    workflow = Workflow.attach(workflow_pipeline_arn)
-    workflow.update(workflow_graph)
-    print("Updating workflow: {}".format(workflow.state_machine_arn))
+    # Create the workflow as the model name
+    workflow = Workflow(model_name, workflow_definition, workflow_role_arn)
+    print("Creating workflow: {}".format(model_name))
 
     # Create output directory
     if not os.path.exists(output_dir):
@@ -387,6 +386,10 @@ def main(
     # Write the workflow graph to json
     with open(os.path.join(output_dir, "workflow-graph.json"), "w") as f:
         f.write(workflow.definition.to_json(pretty=True))
+
+    # Write the workflow graph to yml
+    with open(os.path.join(output_dir, "workflow-graph.yml"), "w") as f:
+        f.write(workflow.get_cloudformation_template())
 
     # Write the workflow inputs to file
     with open(os.path.join(output_dir, "workflow-input.json"), "w") as f:
@@ -406,7 +409,7 @@ def main(
     with open(os.path.join(output_dir, "deploy-model-dev.json"), "w") as f:
         params = get_dev_params(model_name, job_id, deploy_role, image_uri, kms_key_id)
         json.dump(params, f)
-    with open(os.path.join(output_dir, "template-model-prd.json"), "w") as f:
+    with open(os.path.join(output_dir, "deploy-model-prd.json"), "w") as f:
         params = get_prd_params(
             model_name, job_id, deploy_role, image_uri, kms_key_id, notification_arn
         )
@@ -426,7 +429,7 @@ if __name__ == "__main__":
     parser.add_argument("--sagemaker-bucket", required=True)
     parser.add_argument("--kms-key-id", required=True)
     parser.add_argument("--git-branch", required=True)
-    parser.add_argument("--workflow-pipeline-arn", required=True)
+    parser.add_argument("--workflow-role-arn", required=True)
     parser.add_argument("--notification-arn", required=True)
     args = vars(parser.parse_args())
     print("args: {}".format(args))
