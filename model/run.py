@@ -236,7 +236,7 @@ def create_graph(create_experiment_step, baseline_step, training_step):
     return steps.states.Chain([create_experiment_step, sagemaker_jobs])
 
 
-def get_dev_params(model_name, job_id, role, image_uri, kms_key_id):
+def get_dev_config(model_name, job_id, role, image_uri, kms_key_id):
     return {
         "Parameters": {
             "ImageRepoUri": image_uri,
@@ -245,19 +245,26 @@ def get_dev_params(model_name, job_id, role, image_uri, kms_key_id):
             "DeployRoleArn": role,
             "ModelVariant": "dev",
             "KmsKeyId": kms_key_id,
-        }
+        },
+        "Tags": {"mlops:model-name": model_name, "mlops:stage": "dev"},
     }
 
 
-def get_prd_params(model_name, job_id, role, image_uri, kms_key_id, notification_arn):
-    dev_params = get_dev_params(model_name, job_id, role, image_uri, kms_key_id)["Parameters"]
+def get_prd_config(model_name, job_id, role, image_uri, kms_key_id, notification_arn):
+    dev_config = get_dev_config(model_name, job_id, role, image_uri, kms_key_id)
     prod_params = {
         "ModelVariant": "prd",
         "ScheduleMetricName": "feature_baseline_drift_total_amount",
         "ScheduleMetricThreshold": str("0.20"),
         "NotificationArn": notification_arn,
     }
-    return {"Parameters": dict(dev_params, **prod_params)}
+    prod_tags = {
+        "mlops:stage": "prd",
+    }
+    return {
+        "Parameters": dict(dev_config["Parameters"], **prod_params),
+        "Tags": dict(dev_config["Tags"], **prod_tags),
+    }
 
 
 def get_pipeline_execution_id(pipeline_name, codebuild_id):
@@ -407,13 +414,13 @@ def main(
 
     # Write the dev & prod params for CFN
     with open(os.path.join(output_dir, "deploy-model-dev.json"), "w") as f:
-        params = get_dev_params(model_name, job_id, deploy_role, image_uri, kms_key_id)
-        json.dump(params, f)
+        config = get_dev_config(model_name, job_id, deploy_role, image_uri, kms_key_id)
+        json.dump(config, f)
     with open(os.path.join(output_dir, "deploy-model-prd.json"), "w") as f:
-        params = get_prd_params(
+        config = get_prd_config(
             model_name, job_id, deploy_role, image_uri, kms_key_id, notification_arn
         )
-        json.dump(params, f)
+        json.dump(config, f)
 
 
 if __name__ == "__main__":
