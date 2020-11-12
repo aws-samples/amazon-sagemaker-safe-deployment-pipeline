@@ -225,8 +225,8 @@ Resources:
                 echo "export ARTIFACT_BUCKET=${ArtifactBucket}" >> /etc/profile.d/jupyter-env.sh
                 echo "export PIPELINE_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
                 echo "export MODEL_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
-                echo "export WORKFLOW_PIPELINE_ARN=arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName} >> /etc/profile.d/jupyter-env.sh
-                echo "export WORKFLOW_ROLE_ARN=${WorkflowExecutionRole.Arn} >> /etc/profile.d/jupyter-env.sh
+                echo "export WORKFLOW_PIPELINE_ARN=arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}" >> /etc/profile.d/jupyter-env.sh
+                echo "export WORKFLOW_ROLE_ARN=${WorkflowExecutionRole.Arn}" >> /etc/profile.d/jupyter-env.sh
 
   NotebookInstance:
     Type: AWS::SageMaker::NotebookInstance
