@@ -134,6 +134,45 @@ Resources:
       VersioningConfiguration:
         Status: Enabled
 
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "AWSCloudTrailAclCheck"
+            Effect: "Allow"
+            Principal:
+              Service: "cloudtrail.amazonaws.com"
+            Action: "s3:GetBucketAcl"
+            Resource: !GetAtt ArtifactBucket.Arn
+          - Sid: "AWSCloudTrailWrite"
+            Effect: "Allow"
+            Principal:
+              Service: "cloudtrail.amazonaws.com"
+            Action: "s3:PutObject"
+            Resource: !Sub ${ArtifactBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: "bucket-owner-full-control"
+
+  ArtifactBucketTrail: # Required for S3EventRule: https://docs.aws.amazon.com/codepipeline/latest/userguide/create-cloudtrail-S3-source-console.html
+    DependsOn: ArtifactBucketPolicy
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      TrailName: !Sub mlops-${ModelName}
+      S3BucketName: !Ref ArtifactBucket
+      EventSelectors:
+        - DataResources:
+            - Type: AWS::S3::Object
+              Values:
+                - !Sub ${ArtifactBucket.Arn}/${ModelName}/data-source.zip
+          ReadWriteType: WriteOnly
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+      IsMultiRegionTrail: false
+
   NotificationTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -225,7 +264,8 @@ Resources:
                 echo "export ARTIFACT_BUCKET=${ArtifactBucket}" >> /etc/profile.d/jupyter-env.sh
                 echo "export PIPELINE_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
                 echo "export MODEL_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
-                echo "export WORKFLOW_PIPELINE_ARN=${WorkflowPipeline.Arn}" >> /etc/profile.d/jupyter-env.sh
+                echo "export WORKFLOW_PIPELINE_ARN=arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}" >> /etc/profile.d/jupyter-env.sh
+                echo "export WORKFLOW_ROLE_ARN=${WorkflowExecutionRole.Arn}" >> /etc/profile.d/jupyter-env.sh
 
   NotebookInstance:
     Type: AWS::SageMaker::NotebookInstance
@@ -274,31 +314,13 @@ Resources:
           - Name: SAGEMAKER_BUCKET
             Type: PLAINTEXT
             Value: !Sub "sagemaker-${AWS::Region}-${AWS::AccountId}"
-          - Name: WORKFLOW_PIPELINE_ARN
+          - Name: WORKFLOW_ROLE_ARN
             Type: PLAINTEXT
-            Value: !Ref WorkflowPipeline
+            Value: !GetAtt WorkflowExecutionRole.Arn
       Source:
         Type: CODEPIPELINE
         BuildSpec: model/buildspec.yml
       TimeoutInMinutes: 30
-
-  WorkflowPipeline:
-    Type: AWS::StepFunctions::StateMachine
-    Properties:
-      StateMachineName: !Sub ${ModelName}
-      RoleArn: !GetAtt WorkflowExecutionRole.Arn
-      DefinitionString: |-
-        {
-          "Comment": "Place holder for sagemaker training",
-          "StartAt": "Plaecholder",
-          "States": {
-            "Plaecholder": {
-              "Type": "Pass",
-              "Result": "World",
-              "End": true
-            }
-          }
-        }
 
   DeployPipeline:
     Type: "AWS::CodePipeline::Pipeline"
@@ -358,7 +380,7 @@ Resources:
               RunOrder: 1
         - Name: Build
           Actions:
-            - Name: UpdateWorkflow
+            - Name: BuildTemplates
               InputArtifacts:
                 - Name: ModelSourceOutput
                 - Name: DataSourceOutput
@@ -373,7 +395,22 @@ Resources:
                 ProjectName: !Ref BuildProject
                 PrimarySource: ModelSourceOutput
               RunOrder: 1
-            - Name: CustomResources
+            - Name: CreateWorkflow
+              InputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !GetAtt DeployRole.Arn
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub ${ModelName}-workflow
+                TemplatePath: BuildOutput::workflow-graph.yml
+              RunOrder: 2
+            - Name: CreateCustomResources
               InputArtifacts:
                 - Name: BuildOutput
               ActionTypeId:
@@ -386,7 +423,7 @@ Resources:
                 RoleArn: !GetAtt DeployRole.Arn
                 Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
                 StackName: sagemaker-custom-resource # Use global name to re-use across templates
-                TemplatePath: BuildOutput::template-custom-resource.yml
+                TemplatePath: BuildOutput::packaged-custom-resource.yml
               RunOrder: 2
         - Name: Train
           Actions:
@@ -401,7 +438,7 @@ Resources:
               OutputArtifacts:
                 - Name: TrainWorkflow
               Configuration:
-                StateMachineArn: !Ref WorkflowPipeline
+                StateMachineArn: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}"
                 InputType: FilePath
                 Input: workflow-input.json
               RunOrder: 1
@@ -449,8 +486,8 @@ Resources:
                 RoleArn: !GetAtt DeployRole.Arn
                 Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
                 StackName: !Sub ${ModelName}-deploy-prd
-                TemplateConfiguration: BuildOutput::template-model-prd.json
-                TemplatePath: BuildOutput::template-model-prd.yml
+                TemplateConfiguration: BuildOutput::deploy-model-prd.json
+                TemplatePath: BuildOutput::packaged-model-prd.yml
               RunOrder: 1
 
   CodeCommitEventRule:
@@ -579,8 +616,8 @@ Resources:
             Action:
               - states:*
             Resource:
-              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}"
-              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${ModelName}:*"
+              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}*"
+              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${ModelName}*:*"
           - Sid: AllowPassRoleStepFunctions
             Effect: Allow
             Action:
@@ -592,6 +629,7 @@ Resources:
       Roles:
         - !Ref SageMakerRole
         - !Ref PipelineRole
+        - !Ref DeployRole
 
   CodePipelinePolicy:
     Type: AWS::IAM::Policy
@@ -766,6 +804,7 @@ Resources:
                   - cloudformation:*
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ModelName}*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/sagemaker-custom-resource*
               - Sid: AllowCloudWatch
                 Effect: Allow
                 Action:
@@ -911,6 +950,7 @@ Resources:
                   - iam:PassRole
                   - iam:DeleteRolePolicy
                   - iam:CreateServiceLinkedRole
+                  - iam:TagRole
                   - lambda:InvokeFunction
                 Resource: "*"
               - Sid: SageMakerDeployment

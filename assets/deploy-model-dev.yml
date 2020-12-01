@@ -1,4 +1,4 @@
-Description: Deploy a model at Sagemaker
+Description: Deploy the development Amazon SageMaker Endpoint.
 Parameters:
   ImageRepoUri:
     Type: String
@@ -40,15 +40,9 @@ Resources:
           VariantName: !Sub ${ModelVariant}-${ModelName}
       EndpointConfigName: !Sub mlops-${ModelName}-dec-${TrainJobId}
       KmsKeyId: !Ref KmsKeyId
-      Tags:
-        - Key: Name
-          Value: !Sub mlops-${ModelName}-dec-${TrainJobId}
 
   Endpoint:
     Type: "AWS::SageMaker::Endpoint"
     Properties:
       EndpointName: !Sub mlops-${ModelName}-dev-${TrainJobId}
       EndpointConfigName: !GetAtt EndpointConfig.EndpointConfigName
-      Tags:
-        - Key: Name
-          Value: !Sub mlops-${ModelName}-dev-${TrainJobId}

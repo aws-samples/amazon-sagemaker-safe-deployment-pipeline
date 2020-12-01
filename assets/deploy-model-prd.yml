@@ -1,5 +1,5 @@
 Transform: AWS::Serverless-2016-10-31
-Description: Deploy a model at Sagemaker
+Description: Deploy the production Amazon SageMaker Endpoint with Autoscaling, Model Monitoring Schedule and API Gateway Lambda.
 Parameters:
   ImageRepoUri:
     Type: String
@@ -63,18 +63,12 @@ Resources:
         KmsKeyId: !Ref KmsKeyId
       EndpointConfigName: !Sub mlops-${ModelName}-pec-${TrainJobId}
       KmsKeyId: !Ref KmsKeyId
-      Tags:
-        - Key: Name
-          Value: !Sub mlops-${ModelName}-pec-${TrainJobId}
 
   Endpoint:
     Type: "AWS::SageMaker::Endpoint"
     Properties:
       EndpointName: !Sub mlops-${ModelName}-prd-${TrainJobId}
       EndpointConfigName: !GetAtt EndpointConfig.EndpointConfigName
-      Tags:
-        - Key: Name
-          Value: !Sub mlops-${ModelName}-prd-${TrainJobId}
 
   ApiFunction:
     Type: AWS::Serverless::Function

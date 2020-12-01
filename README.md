@@ -19,11 +19,14 @@ In the following diagram, you can view the continuous delivery stages of AWS Cod
 
 ###  Components Details
 
-  - [**Amazon SageMaker**](https://aws.amazon.com/sagemaker/) – This solution uses Amazon SageMaker to train the model to be used and host the model at an endpoint, where it can be accessed via HTTP/HTTPS requests.
   - [**AWS CodePipeline**](https://aws.amazon.com/codepipeline/) – CodePipeline has various stages defined in CloudFormation, which step through which actions must be taken in which order to go from source code to creation of the production endpoint.
-  - [**AWS CodeBuild**](https://aws.amazon.com/codebuild/) – This solution uses CodeBuild to build the source code from GitHub.
-  - [**AWS CloudFormation**](https://aws.amazon.com/cloudformation/) – This solution uses the CloudFormation Template language, in either YAML or JSON, to create each resource including a custom resource.
+  - [**AWS CodeBuild**](https://aws.amazon.com/codebuild/) – This solution uses AWS CodeBuild to build the source code from GitHub.
   - [**Amazon S3**](https://aws.amazon.com/s3/) – Artifacts created throughout the pipeline as well as the data for the model is stored in an Simple Storage Service (S3) Bucket.
+  - [**AWS CloudFormation**](https://aws.amazon.com/cloudformation/) – This solution uses the AWS CloudFormation Template language, in either YAML or JSON, to create each resource including a custom resource.
+  - [**AWS Step Functions**](https://aws.amazon.com/step-functions/) – This solutions creates AWS StepFunctions to orchestrate Amazon SageMaker training and processing jobs.
+  - [**Amazon SageMaker**](https://aws.amazon.com/sagemaker/) – This solution uses Amazon SageMaker to train and deploy the machine learning model.
+  - [**AWS CodeDeploy**](https://aws.amazon.com/codedeploy/) – This solution uses AWS CodeDeploy to automate shifting traffic between two AWS Lambda functions.
+  - [**Amazon API Gateway**](https://aws.amazon.com/api-gateway/) – This solutions creates an HTTPS REST API endpoint for AWS Lambda functions that invoke deployed Amazon SageMaker Endpoint.
 
 ## Deployment Steps
 
@@ -33,7 +36,7 @@ The following is the list of steps required to get up and running with this samp
 
 Create your AWS account at [http://aws.amazon.com](http://aws.amazon.com) by following the instructions on the site.
 
-###  Optionally Fork this GitHub Repository and create an Access Token
+###  *Optionally* fork this GitHub Repository and create an Access Token
  
 1. [Fork](https://github.com/aws-samples/sagemaker-safe-deployment-pipeline/fork) a copy of this repository into your own GitHub account by clicking the **Fork** in the upper right-hand corner.
 2. Follow the steps in the [GitHub documentation](https://help.github.com/en/github/authenticating-to-github/creating-a-personal-access-token-for-the-command-line) to create a new (OAuth 2) token with the following scopes (permissions): `admin:repo_hook` and `repo`. If you already have a token with these permissions, you can use that. You can find a list of all your personal access tokens in [https://github.com/settings/tokens](https://github.com/settings/tokens).  
@@ -50,12 +53,13 @@ Provide a stack name eg **sagemaker-safe-deployment-pipeline** and specify the p
 Parameters | Description
 ----------- | -----------
 Model Name | A unique name for this model (must be less than 15 characters long).
+S3 Bucket for Dataset | The bucket containing the dataset (defaults to [nyc-tlc](https://registry.opendata.aws/nyc-tlc-trip-records-pds/))
 Notebook Instance Type | The [Amazon SageMaker instance type](https://aws.amazon.com/sagemaker/pricing/instance-types/). Default is ml.t3.medium.
-Dataset Bucket | The bucket containing the dataset (defaults to [nyc-tlc](https://registry.opendata.aws/nyc-tlc-trip-records-pds/))
 GitHub Repository | The name (not URL) of the GitHub repository to pull from.
 GitHub Branch | The name (not URL) of the GitHub repository’s branch to use.
 GitHub Username | GitHub Username for this repository. Update this if you have forked the repository.
 GitHub Access Token | The optional Secret OAuthToken with access to your GitHub repository.
+Email Address | The optional Email address to notify on successful or failed deployments.
 
 ![code-pipeline](docs/stack-parameters.png)
 
@@ -158,7 +162,9 @@ This section outlines cost considerations for running the SageMaker Safe Deploym
   - Canaries cost $0.0012 per run, or $5/month if they run every 10 minutes.
   - Dashboards cost $3/month.
   - Alarm metrics cost $0.10 per alarm.
-- **KMS** – $1/month for the key created.
+- **CloudTrail** - Low cost, $0.10 per 100,000 data events to enable [S3 CloudWatch Event](https://docs.aws.amazon.com/codepipeline/latest/userguide/create-cloudtrail-S3-source-console.html).  For more information, see [AWS CloudTrail Pricing](https://aws.amazon.com/cloudtrail/pricing/)
+- **KMS** – $1/month for the [Customer Managed CMK](https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html#customer-cmk) created.
+- **API Gateway** - Low cost, $1.29 for first 300 million requests.  For more info see [Amazon API Gateway pricing](https://aws.amazon.com/api-gateway/pricing/)
 - **Lambda** - Low cost, $0.20 per 1 million request see [AWS Lambda Pricing](https://aws.amazon.com/lambda/pricing/).
 - **SageMaker** – Prices vary based on EC2 instance usage for the Notebook Instances, Model Hosting, Model Training and Model Monitoring; each charged per hour of use. For more information, see [Amazon SageMaker Pricing](https://aws.amazon.com/sagemaker/pricing/).
   - The `ml.t3.medium` instance *notebook* costs $0.0582 an hour.
@@ -173,10 +179,10 @@ This section outlines cost considerations for running the SageMaker Safe Deploym
 
 First, delete the stacks used as part of the pipeline for deployment, training job and suggest baseline. For a model name of **nyctaxi** that would be:
 
-* *nyctaxi*-devploy-prd
-* *nyctaxi*-devploy-dev
-* *nyctaxi*-training-job
-* *nyctaxi*-suggest-baseline
+* *nyctaxi*-deploy-prd
+* *nyctaxi*-deploy-dev
+* *nyctaxi*-workflow
+* sagemaker-custom-resource
 
 Finally, delete the stack you created in AWS CloudFormation.
 
