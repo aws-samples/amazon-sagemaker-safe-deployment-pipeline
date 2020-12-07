@@ -6,6 +6,7 @@ phases:
       python: 3.7
     commands:
       - echo "Installing requirements"
+      - pip install -U boto3 awscli # Upgrade boto3 and awscli
       - pip install -r $CODEBUILD_SRC_DIR/model/requirements.txt
       - pip install crhelper -t $CODEBUILD_SRC_DIR/custom_resource # Install custom resource helper into the CFN directory
 
