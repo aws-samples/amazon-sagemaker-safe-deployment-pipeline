@@ -85,7 +85,7 @@ Parameters:
     Type: String
     Description: Name of the GitHub repository.
   GitHubBranch:
-    Default: sfn-workflow
+    Default: master
     Type: String
     Description: Name of the GitHub branch where the code is located.
   GitHubToken:
