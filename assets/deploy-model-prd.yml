@@ -228,7 +228,6 @@ Resources:
     Type: AWS::SageMaker::MonitoringSchedule
     Properties:
       EndpointName: !GetAtt Endpoint.EndpointName
-      MonitoringScheduleArn: String
       MonitoringScheduleConfig:
         MonitoringJobDefinition:
           BaselineConfig:

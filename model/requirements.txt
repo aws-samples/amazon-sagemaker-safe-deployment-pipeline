@@ -1,2 +1,2 @@
-sagemaker==2.19.0
-stepfunctions==2.0.0rc1
+sagemaker>=2.1.0<3
+stepfunctions==2.0.0
