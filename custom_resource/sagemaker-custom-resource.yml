@@ -1,16 +1,47 @@
-Description: Template for sagemaker cloud formation custom resources
+Description: Template for sagemaker lambda and cloud formation custom resources
 Transform: AWS::Serverless-2016-10-31
 Resources:
-  SuggestBaselineFunction:
+  AddTransformHeaderFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: sagemaker-cfn-suggest-baseline
+      FunctionName: mlops-add-transform-header
       CodeUri: .
-      Handler: sagemaker_suggest_baseline.lambda_handler
+      Handler: sagemaker_add_transform_header.lambda_handler
       Runtime: python3.7
       Role: !GetAtt SagemakerCustomResourceRole.Arn
-      Description: "Creates a SageMaker Monitoring Baseline for a given input"
+      Description: "Prepend header to a batch transform job"
 
+  CreateExperimentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: mlops-create-experiment
+      CodeUri: .
+      Handler: sagemaker_create_experiment.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt SagemakerCustomResourceRole.Arn
+      Description: "Create a SageMaker experiment and trial"
+
+  QueryDriftFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: mlops-query-drift
+      CodeUri: .
+      Handler: sagemaker_query_drift.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt SagemakerCustomResourceRole.Arn
+      Description: "Query processing job to return drift"
+
+  QueryTrainingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: mlops-query-training
+      CodeUri: .
+      Handler: sagemaker_query_training.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt SagemakerCustomResourceRole.Arn
+      Description: "Query training job to return results"
+
+  # Remove once we have native support for this
   MonitoringScheduleFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -20,16 +51,6 @@ Resources:
       Runtime: python3.7
       Role: !GetAtt SagemakerCustomResourceRole.Arn
       Description: "Creates a SageMaker Monitoring Schedule for a given Endpoint"
-
-  TrainingJobFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: sagemaker-cfn-training-job
-      CodeUri: .
-      Handler: sagemaker_training_job.lambda_handler
-      Runtime: python3.7
-      Role: !GetAtt SagemakerCustomResourceRole.Arn
-      Description: "Creates a SageMaker Training Job for a given request"
 
   SagemakerCustomResourceRole:
     Type: AWS::IAM::Role
@@ -52,6 +73,8 @@ Resources:
               - Sid: AllowSageMaker
                 Effect: Allow
                 Action:
+                  - sagemaker:CreateExperiment
+                  - sagemaker:CreateTrial
                   - sagemaker:CreateTrainingJob
                   - sagemaker:DescribeTrainingJob
                   - sagemaker:StopTrainingJob
@@ -62,23 +85,38 @@ Resources:
                   - sagemaker:DeleteEndpointConfig
                   - sagemaker:CreateMonitoringSchedule
                   - sagemaker:ListMonitoringExecutions
+                  - sagemaker:UpdateMonitoringSchedule
                   - sagemaker:DeleteMonitoringSchedule
                   - sagemaker:DescribeMonitoringSchedule
                   - sagemaker:DescribeProcessingJob
                   - sagemaker:CreateProcessingJob
                   - sagemaker:StopProcessingJob
-                  - kms:CreateGrant # Required if KmsKeyId specified
-                Resource: "*"
+                  - kms:CreateGrant # Required if KmsKeyIdf specified
+                Resource:
+                  - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/*
+              - Sid: AllowSageMakerSearch
+                Effect: Allow
+                Action:
+                  - sagemaker:ListMonitoringExecutions
+                Resource: "*" # Allow all resources
+              - Sid: S3Resources
+                Effect: Allow
+                Action:
+                  - s3:GetObject*
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}/*
+                  - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}
               - Sid: AllowLambda
                 Effect: Allow
                 Action:
-                  - lambda:* # Requires at least lambda:AddPermission
-                Resource: "*" # TODO: Narrow this down
+                  - lambda:*
+                Resource: "*"
               - Sid: AllowEvents
                 Effect: Allow
                 Action:
                   - events:* # Requires at least events:PutRule/events:RemoveTargets
-                Resource: "*" # TODO: Narrow this down
+                Resource: "*"
               - Sid: AllowPassRole
                 Effect: Allow
                 Action:

@@ -1,5 +1,5 @@
 Transform: AWS::Serverless-2016-10-31
-Description: Deploy a model at Sagemaker
+Description: Deploy the production Amazon SageMaker Endpoint with Autoscaling, Model Monitoring Schedule and API Gateway Lambda.
 Parameters:
   ImageRepoUri:
     Type: String
@@ -10,12 +10,12 @@ Parameters:
   TrainJobId:
     Type: String
     Description: Id of the Codepipeline + SagemakerJobs
-  MLOpsRoleArn:
+  DeployRoleArn:
     Type: String
     Description: The role for executing the deployment
-  VariantName:
+  ModelVariant:
     Type: String
-    Description: Name of the endpoint variant
+    Description: Name of the model variant
   ScheduleMetricName:
     Type: String
     Description: The metric to alarm on for schedule
@@ -24,6 +24,9 @@ Parameters:
     Description: The metric alarm threshold
   KmsKeyId:
     Description: AWS KMS key ID used to encrypt data at rest on the ML storage volume attached to endpoint config and S3 data capture.
+    Type: String
+  NotificationArn:
+    Description: The arn for notification topic
     Type: String
 
 Resources:
@@ -34,7 +37,7 @@ Resources:
       PrimaryContainer:
         Image: !Ref ImageRepoUri
         ModelDataUrl: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/mlops-${ModelName}-${TrainJobId}/output/model.tar.gz
-      ExecutionRoleArn: !Ref MLOpsRoleArn
+      ExecutionRoleArn: !Ref DeployRoleArn
 
   EndpointConfig:
     Type: "AWS::SageMaker::EndpointConfig"
@@ -44,7 +47,7 @@ Resources:
           InitialVariantWeight: 1.0
           InstanceType: ml.m5.large
           ModelName: !GetAtt Model.ModelName
-          VariantName: !Ref VariantName
+          VariantName: !Sub ${ModelVariant}-${ModelName}
       DataCaptureConfig:
         CaptureContentTypeHeader:
           CsvContentTypes:
@@ -60,23 +63,12 @@ Resources:
         KmsKeyId: !Ref KmsKeyId
       EndpointConfigName: !Sub mlops-${ModelName}-pec-${TrainJobId}
       KmsKeyId: !Ref KmsKeyId
-      Tags:
-        - Key: Name
-          Value: !Sub mlops-${ModelName}-pec-${TrainJobId}
 
   Endpoint:
     Type: "AWS::SageMaker::Endpoint"
     Properties:
       EndpointName: !Sub mlops-${ModelName}-prd-${TrainJobId}
       EndpointConfigName: !GetAtt EndpointConfig.EndpointConfigName
-      Tags:
-        - Key: Name
-          Value: !Sub mlops-${ModelName}-prd-${TrainJobId}
-
-  DeploymentCompleteTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName: !Sub ${AWS::StackName}-deployment
 
   ApiFunction:
     Type: AWS::Serverless::Function
@@ -104,7 +96,7 @@ Resources:
               - DeploymentSuccess
               - DeploymentFailure
             TriggerName: DeploymentCompleteTrigger
-            TriggerTargetArn: !Ref DeploymentCompleteTopic
+            TriggerTargetArn: !Ref NotificationArn
       Environment:
         Variables:
           ENDPOINT_NAME: !GetAtt Endpoint.EndpointName
@@ -138,6 +130,11 @@ Resources:
                 Action:
                   - sagemaker:InvokeEndpoint
                 Resource: "arn:aws:sagemaker:*:*:endpoint/mlops-*"
+              - Sid: AlowSNS
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref NotificationArn
             Version: "2012-10-17"
           PolicyName: SageMakerInvokeEndpoint
 
@@ -148,6 +145,7 @@ Resources:
       CodeUri: ../api
       Handler: pre_traffic_hook.lambda_handler
       Runtime: python3.7
+      Timeout: 30
       KmsKeyArn: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}
       Policies:
         - Version: "2012-10-17"
@@ -179,6 +177,7 @@ Resources:
       CodeUri: ../api
       Handler: post_traffic_hook.lambda_handler
       Runtime: python3.7
+      Timeout: 30
       KmsKeyArn: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}
       Policies:
         - Version: "2012-10-17"
@@ -211,11 +210,11 @@ Resources:
     Properties:
       ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sagemaker-cfn-monitoring-schedule"
       EndpointName: !GetAtt Endpoint.EndpointName
-      ScheduleName: !Sub mlops-${ModelName}-pms-${TrainJobId}
+      ScheduleName: !Sub mlops-${ModelName}-pms
       BaselineConstraintsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/constraints.json
       BaselineStatisticsUri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/statistics.json
       OutputS3URI: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/reports
-      PassRoleArn: !Ref MLOpsRoleArn
+      PassRoleArn: !Ref DeployRoleArn
 
   SagemakerScheduleAlarm:
     Type: "AWS::CloudWatch::Alarm"
@@ -228,11 +227,12 @@ Resources:
           Value: !GetAtt Endpoint.EndpointName
         - Name: MonitoringSchedule
           Value: !GetAtt SagemakerMonitoringSchedule.ScheduleName
-      EvaluationPeriods: 2
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
       MetricName: !Ref ScheduleMetricName
       Namespace: aws/sagemaker/Endpoints/data-metrics
       Period: 60
-      Statistic: Sum
+      Statistic: Average
       Threshold: !Ref ScheduleMetricThreshold
 
   AliasErrorMetricGreaterThanZeroAlarm:
@@ -278,7 +278,7 @@ Resources:
     Properties:
       MaxCapacity: 10
       MinCapacity: 2
-      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${VariantName}
+      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
       RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
@@ -289,7 +289,7 @@ Resources:
     Properties:
       PolicyName: SageMakerVariantInvocationsPerInstance
       PolicyType: TargetTrackingScaling
-      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${VariantName}
+      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
       TargetTrackingScalingPolicyConfiguration:

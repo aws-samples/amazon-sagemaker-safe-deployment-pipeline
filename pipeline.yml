@@ -20,6 +20,7 @@ Metadata:
           default: Required Parameters
         Parameters:
           - ModelName
+          - DatasetBucket
           - NotebookInstanceType
       - Label:
           default: Optional GitHub Parameters
@@ -28,9 +29,15 @@ Metadata:
           - GitHubBranch
           - GitHubUser
           - GitHubToken
+      - Label:
+          default: Optional Notification Settings
+        Parameters:
+          - EmailAddress
     ParameterLabels:
       ModelName:
         default: Model Name
+      DatasetBucket:
+        default: S3 Bucket for Dataset
       NotebookInstanceType:
         default: Notebook Instance Type
       GitHubRepo:
@@ -41,6 +48,8 @@ Metadata:
         default: GitHub Username
       GitHubToken:
         default: GitHub Access Token
+      EmailAddress:
+        default: Email Address
 
 Parameters:
   ModelName:
@@ -63,6 +72,10 @@ Parameters:
       - ml.m5.xlarge
       - ml.m5.2xlarge
     ConstraintDescription: Must select a valid notebook instance type.
+  DatasetBucket:
+    Default: nyc-tlc
+    Description: S3 dataset bucket.
+    Type: String
   GitHubUser:
     Default: aws-samples
     Description: Your GitHub username
@@ -70,17 +83,23 @@ Parameters:
   GitHubRepo:
     Default: amazon-sagemaker-safe-deployment-pipeline
     Type: String
-    Description: Name of the GitHub repository
+    Description: Name of the GitHub repository.
   GitHubBranch:
     Default: master
     Type: String
-    Description: Name of the branch the code is located
+    Description: Name of the GitHub branch where the code is located.
   GitHubToken:
+    Default: ""
     NoEcho: true
-    Description: Github OAuthToken with access to Repo. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af. Go to https://github.com/settings/tokens
+    Description: Optional Github OAuthToken with access to your Repo.  Leave blank to pull the public repository into local CodeCommit.
+    Type: String
+  EmailAddress:
+    Default: ""
+    Description: Email address to notify on successful or failed deployments.
     Type: String
 
 Conditions:
+  EmailAddressNotEmpty: !Not [!Equals [!Ref EmailAddress, ""]]
   GitHubTokenEmpty: !Equals [!Ref GitHubToken, ""]
 
 Resources:
@@ -91,7 +110,7 @@ Resources:
       EnableKeyRotation: true
       KeyPolicy:
         Version: "2012-10-17"
-        Id: !Ref AWS::StackName
+        Id: !Ref ModelName
         Statement:
           - Sid: Allows admin of the key
             Effect: Allow
@@ -115,6 +134,73 @@ Resources:
       VersioningConfiguration:
         Status: Enabled
 
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "AWSCloudTrailAclCheck"
+            Effect: "Allow"
+            Principal:
+              Service: "cloudtrail.amazonaws.com"
+            Action: "s3:GetBucketAcl"
+            Resource: !GetAtt ArtifactBucket.Arn
+          - Sid: "AWSCloudTrailWrite"
+            Effect: "Allow"
+            Principal:
+              Service: "cloudtrail.amazonaws.com"
+            Action: "s3:PutObject"
+            Resource: !Sub ${ArtifactBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: "bucket-owner-full-control"
+
+  ArtifactBucketTrail: # Required for S3EventRule: https://docs.aws.amazon.com/codepipeline/latest/userguide/create-cloudtrail-S3-source-console.html
+    DependsOn: ArtifactBucketPolicy
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      TrailName: !Sub mlops-${ModelName}
+      S3BucketName: !Ref ArtifactBucket
+      EventSelectors:
+        - DataResources:
+            - Type: AWS::S3::Object
+              Values:
+                - !Sub ${ArtifactBucket.Arn}/${ModelName}/data-source.zip
+          ReadWriteType: WriteOnly
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+      IsMultiRegionTrail: false
+
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub mlops-${ModelName}-notification
+
+  NotificationTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AllowCloudWatchEvents
+          Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sns:Publish
+          Resource: !Ref NotificationTopic
+      Topics:
+        - !Ref NotificationTopic
+
+  NotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: EmailAddressNotEmpty
+    Properties:
+      Endpoint: !Ref EmailAddress
+      Protocol: Email
+      TopicArn: !Ref NotificationTopic
+
   GitHubSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -132,7 +218,7 @@ Resources:
   SageMakerCodeRepository:
     Type: AWS::SageMaker::CodeRepository
     Properties:
-      CodeRepositoryName: !Join [ "-",  !Split [ "_" , !Ref GitHubRepo ] ]
+      CodeRepositoryName: !Join ["-", !Split ["_", !Ref GitHubRepo]]
       GitConfig:
         RepositoryUrl:
           Fn::If:
@@ -178,6 +264,8 @@ Resources:
                 echo "export ARTIFACT_BUCKET=${ArtifactBucket}" >> /etc/profile.d/jupyter-env.sh
                 echo "export PIPELINE_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
                 echo "export MODEL_NAME=${ModelName}" >> /etc/profile.d/jupyter-env.sh
+                echo "export WORKFLOW_PIPELINE_ARN=arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}" >> /etc/profile.d/jupyter-env.sh
+                echo "export WORKFLOW_ROLE_ARN=${WorkflowExecutionRole.Arn}" >> /etc/profile.d/jupyter-env.sh
 
   NotebookInstance:
     Type: AWS::SageMaker::NotebookInstance
@@ -201,75 +289,38 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        EnvironmentVariables:
+          - Name: GIT_BRANCH
+            Type: PLAINTEXT
+            Value: !Ref GitHubBranch
+          - Name: MODEL_NAME
+            Type: PLAINTEXT
+            Value: !Ref ModelName
+          - Name: ARTIFACT_BUCKET
+            Type: PLAINTEXT
+            Value: !Ref ArtifactBucket
+          - Name: KMS_KEY_ID
+            Type: PLAINTEXT
+            Value: !Ref KMSKey
+          - Name: DEPLOY_ROLE_ARN
+            Type: PLAINTEXT
+            Value: !GetAtt DeployRole.Arn
+          - Name: NOTIFICATION_ARN
+            Type: PLAINTEXT
+            Value: !Ref NotificationTopic
+          - Name: SAGEMAKER_ROLE_ARN
+            Type: PLAINTEXT
+            Value: !GetAtt SageMakerRole.Arn
+          - Name: SAGEMAKER_BUCKET
+            Type: PLAINTEXT
+            Value: !Sub "sagemaker-${AWS::Region}-${AWS::AccountId}"
+          - Name: WORKFLOW_ROLE_ARN
+            Type: PLAINTEXT
+            Value: !GetAtt WorkflowExecutionRole.Arn
       Source:
         Type: CODEPIPELINE
         BuildSpec: model/buildspec.yml
       TimeoutInMinutes: 30
-
-  CreateExperiment:
-    Type: "AWS::Lambda::Function"
-    Properties:
-      FunctionName: !Sub ${ModelName}-create-experiment
-      Handler: index.lambda_handler
-      MemorySize: 512
-      Role: !GetAtt SageMakerRole.Arn
-      Runtime: python3.6
-      Timeout: 60
-      Code:
-        ZipFile: |
-          import boto3
-          import io
-          import zipfile
-          import json
-
-          s3 = boto3.client('s3')
-          sm = boto3.client('sagemaker')
-          codepipeline = boto3.client('codepipeline')
-
-          def lambda_handler(event, context):
-              print('event', json.dumps(event))
-              jobId = event["CodePipeline.job"]["id"]
-              experiment = None
-              trial = None
-
-              try:
-                  for inputArtifacts in event["CodePipeline.job"]["data"]["inputArtifacts"]:
-                      if inputArtifacts['name'] == 'BuildOutput':
-                          s3Location = inputArtifacts['location']['s3Location']
-                          zip_bytes = s3.get_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'])['Body'].read()
-                          with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
-                            experiment = json.loads(z.read('experiment.json').decode('utf-8'))
-                            trial = json.loads(z.read('trial.json').decode('utf-8'))
-
-                  if experiment is None or trial is None:
-                    raise(Exception("Experiment and Trail config not found"))
-
-                  try:
-                      response = sm.create_experiment(**experiment)
-                      print('created exp', response)
-                  except Exception as e:
-                      print('error creating exp', e)
-                  try:
-                      response = sm.create_trial(**trial)
-                      print('created trial', response)
-                  except Exception as e:
-                      print('error creating trial', e)
-
-                  # and update codepipeline
-                  codepipeline.put_job_success_result(jobId=jobId)
-              except Exception as e:
-                  print(e)
-                  resp = codepipeline.put_job_failure_result(
-                      jobId=jobId,
-                      failureDetails={
-                          'type': 'ConfigurationError',
-                          'message': str(e),
-                          'externalExecutionId': context.aws_request_id
-                      }
-                  )
-              return 'Done'
-
-      Description: "Function that creates an experiment and trial"
 
   DeployPipeline:
     Type: "AWS::CodePipeline::Pipeline"
@@ -295,6 +346,7 @@ Resources:
                     Version: "1"
                     Provider: CodeCommit
                   Configuration:
+                    PollForSourceChanges: false # Triggered by CodeCommitEventRule
                     RepositoryName: !Ref GitHubRepo
                     BranchName: !Ref GitHubBranch
                   OutputArtifacts:
@@ -304,7 +356,7 @@ Resources:
                     Category: Source
                     Owner: ThirdParty
                     Version: "1"
-                    Provider: GitHub
+                    Provider: GitHub # Explore CodeStarSourceConnection: https://docs.aws.amazon.com/codepipeline/latest/userguide/update-github-action-connections.html
                   OutputArtifacts:
                     - Name: ModelSourceOutput
                   Configuration:
@@ -321,12 +373,14 @@ Resources:
               OutputArtifacts:
                 - Name: DataSourceOutput
               Configuration:
+                PollForSourceChanges: false # Triggered by S3EventRule
                 S3Bucket: !Ref ArtifactBucket
                 S3ObjectKey: !Sub ${ModelName}/data-source.zip
+                PollForSourceChanges: false
               RunOrder: 1
         - Name: Build
           Actions:
-            - Name: PackageModel
+            - Name: BuildTemplates
               InputArtifacts:
                 - Name: ModelSourceOutput
                 - Name: DataSourceOutput
@@ -340,9 +394,8 @@ Resources:
               Configuration:
                 ProjectName: !Ref BuildProject
                 PrimarySource: ModelSourceOutput
-                EnvironmentVariables: !Sub '[{"name":"DATA_BUCKET","value":"sagemaker-${AWS::Region}-${AWS::AccountId}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"ROLE_ARN","value":"${MLOpsRole.Arn}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactBucket}","type":"PLAINTEXT"},{"name":"KMS_KEY_ID","value":"${KMSKey}","type":"PLAINTEXT"}]'
               RunOrder: 1
-            - Name: SetupTraining
+            - Name: CreateWorkflow
               InputArtifacts:
                 - Name: BuildOutput
               ActionTypeId:
@@ -352,55 +405,43 @@ Resources:
                 Provider: CloudFormation
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
+                RoleArn: !GetAtt DeployRole.Arn
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub ${ModelName}-workflow
+                TemplatePath: BuildOutput::workflow-graph.yml
+              RunOrder: 2
+            - Name: CreateCustomResources
+              InputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !GetAtt DeployRole.Arn
                 Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
                 StackName: sagemaker-custom-resource # Use global name to re-use across templates
-                TemplatePath: BuildOutput::template-custom-resource.yml
+                TemplatePath: BuildOutput::packaged-custom-resource.yml
               RunOrder: 2
         - Name: Train
           Actions:
-            - Name: CreateExperiment
+            - Name: StartWorkflow
               InputArtifacts:
                 - Name: BuildOutput
               ActionTypeId:
                 Category: Invoke
                 Owner: AWS
-                Version: "1"
-                Provider: Lambda
+                Version: 1
+                Provider: StepFunctions
+              OutputArtifacts:
+                - Name: TrainWorkflow
               Configuration:
-                FunctionName: !Ref CreateExperiment
-                UserParameters: !Sub mlops-pipeline-${ModelName}
+                StateMachineArn: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}"
+                InputType: FilePath
+                Input: workflow-input.json
               RunOrder: 1
-            - Name: TrainModel
-              InputArtifacts:
-                - Name: BuildOutput
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Version: "1"
-                Provider: CloudFormation
-              Configuration:
-                ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
-                StackName: !Sub ${ModelName}-training-job
-                TemplateConfiguration: BuildOutput::training-job.json
-                TemplatePath: BuildOutput::training-job.yml
-              RunOrder: 2
-            - Name: SuggestBaseline
-              InputArtifacts:
-                - Name: BuildOutput
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Version: "1"
-                Provider: CloudFormation
-              Configuration:
-                ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
-                StackName: !Sub ${ModelName}-suggest-baseline
-                TemplateConfiguration: BuildOutput::suggest-baseline.json
-                TemplatePath: BuildOutput::suggest-baseline.yml
-              RunOrder: 2
         - Name: DeployDev
           Actions:
             - Name: DeployModelDev
@@ -413,7 +454,7 @@ Resources:
                 Provider: CloudFormation
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
-                RoleArn: !GetAtt MLOpsRole.Arn
+                RoleArn: !GetAtt DeployRole.Arn
                 StackName: !Sub ${ModelName}-deploy-dev
                 TemplateConfiguration: BuildOutput::deploy-model-dev.json
                 TemplatePath: BuildOutput::deploy-model-dev.yml
@@ -442,18 +483,115 @@ Resources:
                 Provider: CloudFormation
               Configuration:
                 ActionMode: CREATE_UPDATE
-                RoleArn: !GetAtt MLOpsRole.Arn
+                RoleArn: !GetAtt DeployRole.Arn
                 Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
                 StackName: !Sub ${ModelName}-deploy-prd
-                TemplateConfiguration: BuildOutput::template-model-prd.json
-                TemplatePath: BuildOutput::template-model-prd.yml
+                TemplateConfiguration: BuildOutput::deploy-model-prd.json
+                TemplatePath: BuildOutput::packaged-model-prd.yml
               RunOrder: 1
+
+  CodeCommitEventRule:
+    Type: AWS::Events::Rule
+    Condition: GitHubTokenEmpty
+    Properties:
+      Name: !Sub mlops-${ModelName}-codecommit-pipeline
+      Description: "AWS CodeCommit change to trigger AWS Code Pipeline"
+      EventPattern:
+        source:
+          - "aws.codecommit"
+        detail-type:
+          - "CodeCommit Repository State Change"
+        resources:
+          - !GetAtt CodeCommitRepository.Arn
+        detail:
+          referenceType:
+            - "branch"
+          referenceName:
+            - !Ref GitHubBranch
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+        - Arn: !Ref NotificationTopic
+          Id: "CodeCommitRule"
+
+  S3EventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventSource:
+            - s3.amazonaws.com
+          eventName:
+            - CopyObject
+            - PutObject
+            - CompleteMultipartUpload
+          requestParameters:
+            bucketName:
+              - !Ref ArtifactBucket
+            key:
+              - !Sub ${ModelName}/data-source.zip
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+
+  RetrainRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub mlops-${ModelName}-retrain-pipeline
+      Description: "Retrain rule for the AWS Code Pipeline"
+      EventPattern:
+        source:
+          - aws.cloudwatch
+        detail-type:
+          - "CloudWatch Alarm State Change"
+        detail:
+          alarmName:
+            - !Sub mlops-${ModelName}-metric-gt-threshold
+          state:
+            value:
+              - "ALARM"
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+        - Arn: !Ref NotificationTopic
+          Id: "RetrainRule"
+          InputTransformer:
+            InputPathsMap:
+                alarmName: $.detail.alarmName
+                reason: $.detail.state.reason
+            InputTemplate: |
+                "The retrain rule for alarm: <alarmName> has been triggered."
+                "Reason: <reason>."
+
+  ScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub mlops-${ModelName}-schedule-pipeline
+      Description: "Scheduled rule for the AWS Code Pipeline"
+      ScheduleExpression: "cron(0 12 1 * ? *)" # 1 day of month
+      State: DISABLED # Disable by default
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+          RoleArn: !GetAtt CloudWatchEventRole.Arn
+          Id: !Sub codepipeline-${DeployPipeline}
+        - Arn: !Ref NotificationTopic
+          Id: "ScheduleRule"
+          InputTransformer:
+            InputTemplate: |
+                "The schedule rule has been triggered."
 
   CodeCommitPolicy:
     Type: AWS::IAM::Policy
     Condition: GitHubTokenEmpty
     Properties:
-      PolicyName: !Sub mlops-${ModelName}-codecommit-policy
+      PolicyName: !Sub mlops-codecommit-policy
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -466,26 +604,123 @@ Resources:
         - !Ref SageMakerRole
         - !Ref PipelineRole
 
+  StepFunctionsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub mlops-sfn-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowStepFunctions
+            Effect: Allow
+            Action:
+              - states:*
+            Resource:
+              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ModelName}*"
+              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${ModelName}*:*"
+          - Sid: AllowPassRoleStepFunctions
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt WorkflowExecutionRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: states.amazonaws.com
+      Roles:
+        - !Ref SageMakerRole
+        - !Ref PipelineRole
+        - !Ref DeployRole
+
+  CodePipelinePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub mlops-codepipeline-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCodePipeline
+            Effect: Allow
+            Action:
+              - codepipeline:*
+            Resource:
+              - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
+              - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}/*"
+      Roles:
+        - !Ref SageMakerRole
+
+  SageMakerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub mlops-sagemaker-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSageMaker
+            Effect: Allow
+            Action:
+              - sagemaker:CreateExperiment
+              - sagemaker:CreateTrial
+              - sagemaker:CreateHyperParameterTuningJob
+              - sagemaker:CreateModel
+              - sagemaker:CreateProcessingJob
+              - sagemaker:CreateTrainingJob
+              - sagemaker:CreateTransformJob
+              - sagemaker:DeleteMonitoringSchedule
+              - sagemaker:DescribeTrainingJob
+              - sagemaker:DescribeHyperParameterTuningJob
+              - sagemaker:DescribeEndpoint
+              - sagemaker:DescribeEndpointConfig
+              - sagemaker:DescribeMonitoringSchedule
+              - sagemaker:DescribeProcessingJob
+              - sagemaker:DescribeTrainingJob
+              - sagemaker:DescribeTransformJob
+              - sagemaker:InvokeEndpoint
+              - sagemaker:ListTags
+              - sagemaker:ListMonitoringExecutions
+              - sagemaker:Search
+              - sagemaker:StopProcessingJob
+              - sagemaker:StopTrainingJob
+              - sagemaker:StopTransformJob
+              - kms:CreateGrant
+            Resource:
+              - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/mlops-${ModelName}*
+              - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/model-monitoring-*
+          - Sid: AllowSageMakerSearch
+            Effect: Allow
+            Action:
+              - sagemaker:ListMonitoringExecutions
+              - sagemaker:ListMonitoringSchedules
+              - sagemaker:Search
+            Resource: "*"
+      Roles:
+        - !Ref SageMakerRole
+        - !Ref WorkflowExecutionRole
+
   S3Policy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub mlops-${ModelName}-s3-policy
+      PolicyName: !Sub mlops-s3-policy
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Sid: S3Resources
             Effect: Allow
             Action:
-              - s3:CreateBucket
               - s3:GetBucket*
               - s3:GetObject*
-              - s3:ListBucket
               - s3:PutObject
             Resource:
-              - arn:aws:s3:::nyc-tlc/*
+              - !Sub arn:aws:s3:::${DatasetBucket}/*
               - !Sub arn:aws:s3:::${ArtifactBucket}/*
               - !Sub arn:aws:s3:::${ArtifactBucket}
               - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}/*
+              - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}
+          - Sid: S3Bucket
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:ListBucket
+            Resource:
               - !Sub arn:aws:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}
           - Sid: AllowKms
             Effect: Allow
@@ -507,7 +742,7 @@ Resources:
       Roles:
         - !Ref SageMakerRole
         - !Ref PipelineRole
-        - !Ref MLOpsRole
+        - !Ref DeployRole
 
   CloudWatchEventRole:
     Type: AWS::IAM::Role
@@ -516,44 +751,20 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: Allow
+          - Effect: Allow
             Principal:
               Service:
                 - events.amazonaws.com
             Action: sts:AssumeRole
       Path: /
       Policies:
-        -
-          PolicyName: "mlops-cwe-pipeline-execution"
+        - PolicyName: "mlops-cwe-pipeline-execution"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              -
-                Effect: Allow
+              - Effect: Allow
                 Action: codepipeline:StartPipelineExecution
                 Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
-
-  CloudWatchEventRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub mlops-${ModelName}-retrain
-      EventPattern:
-        source:
-          - aws.cloudwatch
-        detail-type:
-          - "CloudWatch Alarm State Change"
-        detail:
-          alarmName:
-            - !Sub mlops-${ModelName}-metric-gt-threshold
-          state:
-            value:
-              - "ALARM"
-      Targets:
-        -
-          Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
-          RoleArn: !GetAtt CloudWatchEventRole.Arn
-          Id: !Sub codepipeline-${DeployPipeline}
 
   SageMakerRole:
     Type: AWS::IAM::Role
@@ -562,6 +773,12 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
           - Effect: "Allow"
             Principal:
               Service:
@@ -574,49 +791,20 @@ Resources:
                 - "codebuild.amazonaws.com"
             Action:
               - "sts:AssumeRole"
-          - Effect: "Allow"
-            Principal:
-              Service:
-                - "lambda.amazonaws.com"
-            Action:
-              - "sts:AssumeRole"
       ManagedPolicyArns:
         - "arn:aws:iam::aws:policy/CloudWatchSyntheticsFullAccess"
       Policies:
-        - PolicyName: "mlops-sagemaker-policy"
+        - PolicyName: "mlops-notebook-policy"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Sid: AllowCloudFormation
                 Effect: Allow
                 Action:
-                  - cloudformation:DescribeStacks
-                  - cloudformation:DescribeStackEvents
+                  - cloudformation:*
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ModelName}*
-              - Sid: SageMakerTesting
-                Effect: Allow
-                Action:
-                  - sagemaker:CreateExperiment
-                  - sagemaker:CreateTrial
-                  - sagemaker:DescribeEndpoint
-                  - sagemaker:DescribeEndpointConfig
-                  - sagemaker:DescribeMonitoringSchedule
-                  - sagemaker:DescribeProcessingJob
-                  - sagemaker:InvokeEndpoint
-                  - sagemaker:ListMonitoringExecutions
-                  - sagemaker:Search
-                Resource: "*"
-              - Sid: AllowCodePipeline
-                Effect: Allow
-                Action:
-                  - codepipeline:GetPipeline
-                  - codepipeline:GetPipelineState
-                  - codepipeline:GetPipelineExecution
-                  - codepipeline:PutApprovalResult
-                  - codepipeline:PutJobFailureResult
-                  - codepipeline:PutJobSuccessResult
-                Resource: "*"
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/sagemaker-custom-resource*
               - Sid: AllowCloudWatch
                 Effect: Allow
                 Action:
@@ -628,14 +816,60 @@ Resources:
                   - cloudwatch:DeleteDashboards
                   - iam:GetRole
                 Resource: "*"
-              - Sid: AllowPassRoleLambda
+              - Sid: AllowCanaryPassRole
                 Effect: Allow
                 Action:
                   - iam:PassRole
                 Resource: "*"
                 Condition:
                   StringEquals:
-                    iam:PassedToService: lambda.amazonaws.com
+                    iam:PassedToService:
+                      - lambda.amazonaws.com
+
+  WorkflowExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub mlops-${ModelName}-sfn-execution-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/CloudWatchEventsFullAccess"
+      Policies:
+        - PolicyName: "mlops-sfn-sagemaker"
+          PolicyDocument:
+            Statement:
+              - Sid: AllowLambda
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - arn:aws:lambda:*:*:function:mlops-*
+              - Sid: AllowEvents
+                Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:DescribeRule
+                  - events:PutRule
+                Resource:
+                  - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTrainingJobsRule
+                  - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTuningJobsRule
+                  - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerProcessingJobsRule
+              - Sid: AllowPassRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt SageMakerRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: sagemaker.amazonaws.com
+            Version: "2012-10-17"
 
   PipelineRole:
     Type: "AWS::IAM::Role"
@@ -663,7 +897,6 @@ Resources:
                   - lambda:AddPermission
                   - lambda:CreateFunction
                   - lambda:DeleteFunction
-                  - lambda:InvokeFunction
                 Resource: "*"
               - Sid: CodeBuild
                 Effect: Allow
@@ -675,9 +908,9 @@ Resources:
                 Effect: Allow
                 Action:
                   - iam:PassRole
-                Resource: !GetAtt MLOpsRole.Arn
+                Resource: !GetAtt DeployRole.Arn
 
-  MLOpsRole:
+  DeployRole:
     Type: "AWS::IAM::Role"
     Properties:
       RoleName: !Sub mlops-${ModelName}-deploy-role
@@ -717,6 +950,7 @@ Resources:
                   - iam:PassRole
                   - iam:DeleteRolePolicy
                   - iam:CreateServiceLinkedRole
+                  - iam:TagRole
                   - lambda:InvokeFunction
                 Resource: "*"
               - Sid: SageMakerDeployment
@@ -733,6 +967,11 @@ Resources:
                   - sagemaker:DescribeModel
                   - sagemaker:UpdateEndpointWeightsAndCapacities
                   - kms:CreateGrant
+                Resource: "*"
+              - Sid: AllowCloudWatch
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
                 Resource: "*"
               - Sid: ApiDeployment
                 Effect: Allow
@@ -775,3 +1014,11 @@ Resources:
                 Condition:
                   StringEquals:
                     iam:PassedToService: sagemaker.amazonaws.com
+
+Outputs:
+  DeployPipeline:
+    Description: The deployment pipeline
+    Value: !Ref DeployPipeline
+  NotebookInstance:
+    Description: The sagemaker notebook
+    Value: !Ref NotebookInstance

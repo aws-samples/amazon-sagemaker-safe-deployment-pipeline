@@ -35,10 +35,11 @@ def update_handler(event, context):
     schedule_name = get_schedule_name(event)
     logger.info("Updating schedule: %s", schedule_name)
     try:
-        is_schedule_ready(schedule_name)
+        if is_schedule_ready(schedule_name):
+            return update_monitoring_schedule(event)
     except ClientError as e:
         if e.response["Error"]["Code"] == "ResourceNotFound":
-            return create_handler(event, context)
+            return create_monitoring_schedule(event)
         else:
             logger.error("Unexpected error while trying to delete endpoint config")
             raise e
@@ -55,15 +56,29 @@ def delete_handler(event, context):
 
 
 @helper.poll_create
-@helper.poll_update
 def poll_create(event, context):
     """
-    Return true if the resource has been created and false otherwise so
+    Return physical resource if the resource has been created and false otherwise so
     CloudFormation polls again.
     """
     schedule_name = get_schedule_name(event)
     logger.info("Polling for creation of schedule: %s", schedule_name)
-    return is_schedule_ready(schedule_name)
+    if is_schedule_ready(schedule_name):
+        return event["CrHelperData"]["PhysicalResourceId"]
+    return False
+
+
+@helper.poll_update
+def poll_update(event, context):
+    """
+    Return physical resource if the resource has been updated and false otherwise so
+    CloudFormation polls again.
+    """
+    schedule_name = get_schedule_name(event)
+    logger.info("Polling for updation of schedule: %s", schedule_name)
+    if is_schedule_ready(schedule_name):
+        return event["CrHelperData"]["PhysicalResourceId"]
+    return False
 
 
 @helper.poll_delete
@@ -80,9 +95,7 @@ def poll_delete(event, context):
 
 
 def get_model_monitor_container_uri(region):
-    container_uri_format = (
-        "{0}.dkr.ecr.{1}.amazonaws.com/sagemaker-model-monitor-analyzer"
-    )
+    container_uri_format = "{0}.dkr.ecr.{1}.amazonaws.com/sagemaker-model-monitor-analyzer"
 
     regions_to_accounts = {
         "eu-north-1": "895015795356",
@@ -131,9 +144,31 @@ def create_monitoring_schedule(event):
         return helper.Data["Arn"]
     except ClientError as e:
         if e.response["Error"]["Code"] == "ValidationException":
-            logger.error(
-                "Unable to create schedule: %s", e.response["Error"]["Message"]
-            )
+            logger.error("Unable to create schedule: %s", e.response["Error"]["Message"])
+        else:
+            logger.error("Unexpected error while trying to delete monitoring schedule")
+        raise e
+
+
+def update_monitoring_schedule(event):
+    schedule_name = get_schedule_name(event)
+    monitoring_schedule_config = create_monitoring_schedule_config(event)
+
+    logger.info("Updating monitoring schedule with name: %s", schedule_name)
+
+    try:
+        response = sm.update_monitoring_schedule(
+            MonitoringScheduleName=schedule_name,
+            MonitoringScheduleConfig=monitoring_schedule_config,
+        )
+
+        # Updating the monitoring schedule arn
+        helper.Data["ScheduleName"] = schedule_name
+        helper.Data["Arn"] = response["MonitoringScheduleArn"]
+        return helper.Data["Arn"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ValidationException":
+            logger.error("Unable to update schedule: %s", e.response["Error"]["Message"])
         else:
             logger.error("Unexpected error while trying to delete monitoring schedule")
         raise e
@@ -149,15 +184,23 @@ def is_schedule_ready(schedule_name):
         is_ready = True
     elif status == "Pending":
         logger.info(
-            "Monitoring schedule (%s) still creating, waiting and polling again...",
-            schedule_name,
+            "Monitoring schedule (%s) still creating, waiting and polling again...", schedule_name,
         )
     else:
         raise Exception(
-            "Monitoring schedule ({}) has unexpected status: {}".format(
-                schedule_name, status
-            )
+            "Monitoring schedule ({}) has unexpected status: {}".format(schedule_name, status)
         )
+
+    # Check if we have running schedule excutions before deleting schedule
+    response = sm.list_monitoring_executions(MonitoringScheduleName=schedule_name)
+    running = [
+        m["MonitoringExecutionStatus"]
+        for m in response["MonitoringExecutionSummaries"]
+        if m["MonitoringExecutionStatus"] in ["Pending", "InProgress", "Stopping"]
+    ]
+    if running:
+        logger.info("You still have %d executions: %s", len(running), ",".join(running))
+        is_ready = False
 
     return is_ready
 
@@ -178,9 +221,7 @@ def create_monitoring_schedule_config(event):
                 {
                     "EndpointInput": {
                         "EndpointName": props["EndpointName"],
-                        "LocalPath": props.get(
-                            "InputLocalPath", "/opt/ml/processing/endpointdata"
-                        ),
+                        "LocalPath": props.get("InputLocalPath", "/opt/ml/processing/endpointdata"),
                         "S3InputMode": "File",
                         "S3DataDistributionType": "FullyReplicated",
                     }
@@ -207,19 +248,13 @@ def create_monitoring_schedule_config(event):
                 }
             },
             "MonitoringAppSpecification": {
-                "ImageUri": props.get(
-                    "ImageURI", get_model_monitor_container_uri(helper._region)
-                ),
+                "ImageUri": props.get("ImageURI", get_model_monitor_container_uri(helper._region)),
             },
             "StoppingCondition": {
-                "MaxRuntimeInSeconds": int(
-                    props.get("MaxRuntimeInSeconds", 1800)
-                )  # 30 mins
+                "MaxRuntimeInSeconds": int(props.get("MaxRuntimeInSeconds", 1800))  # 30 mins
             },
             "Environment": {
-                "publish_cloudwatch_metrics": props.get(
-                    "PublishCloudwatchMetrics", "Enabled"
-                )
+                "publish_cloudwatch_metrics": props.get("PublishCloudwatchMetrics", "Enabled")
             },
             "RoleArn": props["PassRoleArn"],
         },
@@ -237,9 +272,7 @@ def create_monitoring_schedule_config(event):
         app["RecordPreprocessorSourceUri"] = props["RecordPreprocessorSourceUri"]
     if props.get("PostAnalyticsProcessorSourceUri"):
         app = request["MonitoringJobDefinition"]["MonitoringAppSpecification"]
-        app["PostAnalyticsProcessorSourceUri"] = props[
-            "PostAnalyticsProcessorSourceUri"
-        ]
+        app["PostAnalyticsProcessorSourceUri"] = props["PostAnalyticsProcessorSourceUri"]
 
     return request
 
@@ -247,22 +280,7 @@ def create_monitoring_schedule_config(event):
 def delete_monitoring_schedule(schedule_name):
     try:
         if is_schedule_ready(schedule_name):
-            # Check if we have running schedule excutions before deleting schedule
-            response = sm.list_monitoring_executions(
-                MonitoringScheduleName=schedule_name
-            )
-            running = [
-                m["MonitoringExecutionStatus"]
-                for m in response["MonitoringExecutionSummaries"]
-                if m["MonitoringExecutionStatus"]
-                in ["Pending", "InProgress", "Stopping"]
-            ]
-            if running:
-                logger.info(
-                    "You still have %d executions: %s", len(running), ",".join(running)
-                )
-            else:
-                sm.delete_monitoring_schedule(MonitoringScheduleName=schedule_name)
+            sm.delete_monitoring_schedule(MonitoringScheduleName=schedule_name)
     except ClientError as e:
         if e.response["Error"]["Code"] == "ResourceNotFound":
             logger.info("Resource not found, nothing to delete")
