@@ -258,7 +258,7 @@ Resources:
             MaxRuntimeInSeconds: 1800
         ScheduleConfig:
           ScheduleExpression: "cron(0 * ? * * *)"
-      MonitoringScheduleName: !Sub mlops-${ModelName}-pms-${TrainJobId}
+      MonitoringScheduleName: !Sub mlops-${ModelName}-pms
 
   SagemakerScheduleAlarm:
     Type: "AWS::CloudWatch::Alarm"
@@ -270,7 +270,7 @@ Resources:
         - Name: Endpoint
           Value: !GetAtt Endpoint.EndpointName
         - Name: MonitoringSchedule
-          Value: !GetAtt SagemakerMonitoringSchedule.ScheduleName
+          Value: !Sub mlops-${ModelName}-pms
       EvaluationPeriods: 1
       DatapointsToAlarm: 1
       MetricName: !Ref ScheduleMetricName

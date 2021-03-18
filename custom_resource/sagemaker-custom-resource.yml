@@ -72,22 +72,12 @@ Resources:
                   - sagemaker:CreateEndpointConfig
                   - sagemaker:DescribeEndpointConfig
                   - sagemaker:DeleteEndpointConfig
-                  - sagemaker:CreateMonitoringSchedule
-                  - sagemaker:ListMonitoringExecutions
-                  - sagemaker:UpdateMonitoringSchedule
-                  - sagemaker:DeleteMonitoringSchedule
-                  - sagemaker:DescribeMonitoringSchedule
                   - sagemaker:DescribeProcessingJob
                   - sagemaker:CreateProcessingJob
                   - sagemaker:StopProcessingJob
-                  - kms:CreateGrant # Required if KmsKeyIdf specified
+                  - kms:CreateGrant # Required if KmsKeyId specified
                 Resource:
                   - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/*
-              - Sid: AllowSageMakerSearch
-                Effect: Allow
-                Action:
-                  - sagemaker:ListMonitoringExecutions
-                Resource: "*" # Allow all resources
               - Sid: S3Resources
                 Effect: Allow
                 Action:
