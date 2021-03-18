@@ -930,6 +930,8 @@ Resources:
             Action:
               - "sts:AssumeRole"
       Path: "/"
+      ManagedPolicyArns:
+        - Fn::Sub: "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
       Policies:
         - PolicyName: "mlops-deploy"
           PolicyDocument:
@@ -959,13 +961,18 @@ Resources:
                   - sagemaker:CreateEndpoint
                   - sagemaker:CreateEndpointConfig
                   - sagemaker:CreateModel
+                  - sagemaker:CreateMonitoringSchedule
                   - sagemaker:DeleteEndpoint
                   - sagemaker:DeleteEndpointConfig
                   - sagemaker:DeleteModel
+                  - sagemaker:DeleteMonitoringSchedule
                   - sagemaker:DescribeEndpoint
                   - sagemaker:DescribeEndpointConfig
+                  - sagemaker:DescribeMonitoringSchedule
                   - sagemaker:DescribeModel
+                  - sagemaker:ListMonitoringExecutions
                   - sagemaker:UpdateEndpointWeightsAndCapacities
+                  - sagemaker:UpdateMonitoringSchedule
                   - kms:CreateGrant
                 Resource: "*"
               - Sid: AllowCloudWatch

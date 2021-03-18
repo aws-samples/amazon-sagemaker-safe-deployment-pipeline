@@ -41,17 +41,6 @@ Resources:
       Role: !GetAtt SagemakerCustomResourceRole.Arn
       Description: "Query training job to return results"
 
-  # Remove once we have native support for this
-  MonitoringScheduleFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: sagemaker-cfn-monitoring-schedule
-      CodeUri: .
-      Handler: sagemaker_monitoring_schedule.lambda_handler
-      Runtime: python3.7
-      Role: !GetAtt SagemakerCustomResourceRole.Arn
-      Description: "Creates a SageMaker Monitoring Schedule for a given Endpoint"
-
   SagemakerCustomResourceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -83,22 +72,12 @@ Resources:
                   - sagemaker:CreateEndpointConfig
                   - sagemaker:DescribeEndpointConfig
                   - sagemaker:DeleteEndpointConfig
-                  - sagemaker:CreateMonitoringSchedule
-                  - sagemaker:ListMonitoringExecutions
-                  - sagemaker:UpdateMonitoringSchedule
-                  - sagemaker:DeleteMonitoringSchedule
-                  - sagemaker:DescribeMonitoringSchedule
                   - sagemaker:DescribeProcessingJob
                   - sagemaker:CreateProcessingJob
                   - sagemaker:StopProcessingJob
-                  - kms:CreateGrant # Required if KmsKeyIdf specified
+                  - kms:CreateGrant # Required if KmsKeyId specified
                 Resource:
                   - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:*/*
-              - Sid: AllowSageMakerSearch
-                Effect: Allow
-                Action:
-                  - sagemaker:ListMonitoringExecutions
-                Resource: "*" # Allow all resources
               - Sid: S3Resources
                 Effect: Allow
                 Action:
