@@ -30,23 +30,52 @@ Parameters:
     Type: String
 
 Mappings:
+  # Latest Model Monitor mapping: https://github.com/aws/sagemaker-python-sdk/blob/master/src/sagemaker/image_uri_config/model-monitor.json
   ModelAnalyzerMap:
-    "us-west-2":
-      "ImageUri": "159807026194.dkr.ecr.us-west-2.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
-    "us-east-2":
-      "ImageUri": "680080141114.dkr.ecr.us-east-2.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
-    "us-east-1":
-      "ImageUri": "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
-    "eu-west-1":
-      "ImageUri": "890145073186.dkr.ecr.eu-west-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "af-south-1":
+      "ImageUri": "875698925577.dkr.ecr.af-south-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "ap-east-1":
+      "ImageUri": "001633400207.dkr.ecr.ap-east-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
     "ap-northeast-1":
       "ImageUri": "574779866223.dkr.ecr.ap-northeast-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
     "ap-northeast-2":
       "ImageUri": "709848358524.dkr.ecr.ap-northeast-2.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "ap-south-1":
+      "ImageUri": "126357580389.dkr.ecr.ap-south-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "ap-southeast-1":
+      "ImageUri": "245545462676.dkr.ecr.ap-southeast-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
     "ap-southeast-2":
       "ImageUri": "563025443158.dkr.ecr.ap-southeast-2.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "ca-central-1":
+      "ImageUri": "536280801234.dkr.ecr.eu-central-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "cn-north-1":
+      "ImageUri": "453000072557.dkr.ecr.cn-north-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "cn-northwest-1":
+      "ImageUri": "453252182341.dkr.ecr.cn-northwest-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
     "eu-central-1":
       "ImageUri": "048819808253.dkr.ecr.eu-central-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "eu-north-1":
+      "ImageUri": "895015795356.dkr.ecr.eu-north-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "eu-south-1":
+      "ImageUri": "933208885752.dkr.ecr.eu-south-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "eu-west-1":
+      "ImageUri": "468650794304.dkr.ecr.eu-west-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "eu-west-2":
+      "ImageUri": "749857270468.dkr.ecr.eu-west-2.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "eu-west-3":
+      "ImageUri": "680080141114.dkr.ecr.eu-west-3.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "me-south-1":
+      "ImageUri": "607024016150.dkr.ecr.me-south-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "sa-east-1":
+      "ImageUri": "539772159869.dkr.ecr.sa-east-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "us-east-1":
+      "ImageUri": "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "us-east-2":
+      "ImageUri": "777275614652.dkr.ecr.us-east-2.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "us-west-1":
+      "ImageUri": "890145073186.dkr.ecr.us-west-1.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
+    "us-west-2":
+      "ImageUri": "159807026194.dkr.ecr.us-west-2.amazonaws.com/sagemaker-model-monitor-analyzer:latest"
 
 Resources:
   Model:
