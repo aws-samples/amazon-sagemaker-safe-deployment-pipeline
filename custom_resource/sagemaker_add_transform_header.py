@@ -37,4 +37,3 @@ def lambda_handler(event, context):
     return new_obj.put(
         Body=body.encode("utf-8"), ContentType="text/csv", Metadata={"header": "true"}
     )
-

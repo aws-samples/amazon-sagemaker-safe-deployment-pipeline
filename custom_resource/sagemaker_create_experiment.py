@@ -46,5 +46,8 @@ def lambda_handler(event, context):
             raise error
     return {
         "statusCode": 200,
-        "results": {"ExperimentCreated": experiment_created, "TrialCreated": trial_created,},
+        "results": {
+            "ExperimentCreated": experiment_created,
+            "TrialCreated": trial_created,
+        },
     }

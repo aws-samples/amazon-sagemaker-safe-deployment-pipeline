@@ -1,5 +1,11 @@
 Description: Wait for a training job
 Parameters:
+  ProjectPrefix:
+    Type: String
+    Description: |
+      Makes resource privileges for services using this template scoped-limited.
+      Changing the default must be done with care
+    Default: PROJECT_PREFIX
   ModelName:
     Type: String
     Description: Name of the model
@@ -17,8 +23,8 @@ Resources:
   SagemakerTrainingJob:
     Type: Custom::TrainingJob
     Properties:
-      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sagemaker-cfn-training-job"
-      TrainingJobName: !Sub mlops-${ModelName}-${TrainJobId}
+      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectPrefix}-sagemaker-cfn-training-job"
+      TrainingJobName: !Sub ${ProjectPrefix}-${ModelName}-${TrainJobId}
       TrainingJobRequest: !Ref TrainJobRequest
       ExperimentName: !Ref ModelName
       TrialName: !Ref TrainJobId

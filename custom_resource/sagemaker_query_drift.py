@@ -23,7 +23,8 @@ def get_processing_job(processing_job_name):
 
 def get_s3_results_json(result_bucket, result_path, filename):
     s3_object = s3_client.get_object(
-        Bucket=result_bucket, Key=os.path.join(result_path.lstrip("/"), filename),
+        Bucket=result_bucket,
+        Key=os.path.join(result_path.lstrip("/"), filename),
     )
     return json.loads(s3_object["Body"].read())
 
@@ -81,4 +82,3 @@ def lambda_handler(event, context):
         message = "Failed to read processing status!"
         print(e)
         return {"statusCode": 500, "error": message}
-

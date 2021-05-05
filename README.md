@@ -1,5 +1,4 @@
 # Amazon SageMaker Safe Deployment Pipeline
-
 ## Introduction
 
 This is a sample solution to build a safe deployment pipeline for Amazon SageMaker. This example could be useful for any organization looking to operationalize machine learning with native AWS development tools such as AWS CodePipeline, AWS CodeBuild and AWS CodeDeploy.
@@ -32,48 +31,41 @@ In the following diagram, you can view the continuous delivery stages of AWS Cod
 
 The following is the list of steps required to get up and running with this sample.
 
-###  Prepare an AWS Account
+###  Requirements
 
-Create your AWS account at [http://aws.amazon.com](http://aws.amazon.com) by following the instructions on the site.
+* Create your AWS account at [http://aws.amazon.com](http://aws.amazon.com) by following the instructions on the site.
+* Install [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) with appropriate IAM permissions
+* A Studio user account, see [onboard to Amazon SageMaker Studio](https://docs.aws.amazon.com/sagemaker/latest/dg/gs-studio-onboard.html)
+###  Enable Amazon SageMaker Studio Project
 
-###  *Optionally* fork this GitHub Repository and create an Access Token
- 
-1. [Fork](https://github.com/aws-samples/sagemaker-safe-deployment-pipeline/fork) a copy of this repository into your own GitHub account by clicking the **Fork** in the upper right-hand corner.
-2. Follow the steps in the [GitHub documentation](https://help.github.com/en/github/authenticating-to-github/creating-a-personal-access-token-for-the-command-line) to create a new (OAuth 2) token with the following scopes (permissions): `admin:repo_hook` and `repo`. If you already have a token with these permissions, you can use that. You can find a list of all your personal access tokens in [https://github.com/settings/tokens](https://github.com/settings/tokens).  
-3. Copy the access token to your clipboard. For security reasons, after you navigate off the page, you will not be able to see the token again.  If you have lost your token, you can [regenerate](https://docs.aws.amazon.com/codepipeline/latest/userguide/GitHub-authentication.html#GitHub-rotate-personal-token-CLI) your token.
+1. From AWS console navigate to Amazon SageMaker Studio and click on your studio user name (do **not** Open Studio now) and copy the name of execution role as shown below (similar to `AmazonSageMaker-ExecutionRole-20210112T085906`)
 
-###  Launch the AWS CloudFormation Stack
+<p align="center">
+  <img src="docs/studio-execution-role.png" alt="role" width="800" height="400"/>
+</p>
 
-Click on the **Launch Stack** button below to launch the CloudFormation Stack to set up the SageMaker safe deployment pipeline.
+2. Use the provided `build.sh` as follows
+```
+# bash build.sh S3_BUCKET_NAME STACK_NAME REGION STUDIO_ROLE_NAME
+# REGION should match your default AWS CLI region
+# STUDIO_ROLE_NAME is copied from step 1. Example:
+bash build.sh example-studio example-pipeline us-east-1 AmazonSageMaker-ExecutionRole-20210112T085906
+```
 
-[![Launch CFN stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateUrl=https%3A%2F%2Famazon-sagemaker-safe-deployment-pipeline.s3.amazonaws.com%2Fsfn%2Fpipeline.yml&stackName=nyctaxi&param_GitHubBranch=master&param_GitHubRepo=amazon-sagemaker-safe-deployment-pipeline&param_GitHubUser=aws-samples&param_ModelName=nyctaxi&param_NotebookInstanceType=ml.t3.medium)
+3. From the AWS console navigate to `cloudformation` and once the stack `STACK_NAME` is ready
+4. Go to your SageMaker Studio and **Open Studio** (and possibly refresh your browser if you're already in Studio) and from the your left hand side panel, click on the inverted triangle. As with the screenshot below, under `Projects -> Create project -> Organization templates`, you should be able to see the added **SageMaker Safe Deployment Pipeline**. Click on the template name and **Select project template**
 
-Provide a stack name eg **sagemaker-safe-deployment-pipeline** and specify the parameters.
+<p align="center">
+  <img src="docs/studio-sagemaker-project-template.png" alt="role" width="800" height="400"/>
+</p>
 
-Parameters | Description
------------ | -----------
-Model Name | A unique name for this model (must be less than 15 characters long).
-S3 Bucket for Dataset | The bucket containing the dataset (defaults to [nyc-tlc](https://registry.opendata.aws/nyc-tlc-trip-records-pds/))
-Notebook Instance Type | The [Amazon SageMaker instance type](https://aws.amazon.com/sagemaker/pricing/instance-types/). Default is ml.t3.medium.
-GitHub Repository | The name (not URL) of the GitHub repository to pull from.
-GitHub Branch | The name (not URL) of the GitHub repository’s branch to use.
-GitHub Username | GitHub Username for this repository. Update this if you have forked the repository.
-GitHub Access Token | The optional Secret OAuthToken with access to your GitHub repository.
-Email Address | The optional Email address to notify on successful or failed deployments.
+5. Choose a name for the project and can leave the rest of the fields with their default values (can use your own email for SNS notifications) and click on **Create project**
+6. Once the project is created, it gives you the option to clone it locally from AWS CodeCommit by a single click. Click clone and it goes directly to the project
+7. Navigate to the code base and go to `notebook/mlops.ipynb`
+8.  Choose a kernel from the prompt such as `Python 3 (Data Science)`
+9.  Assign your project name to the placeholder `PROJECT_NAME` in the first code cell of the `mlops.ipynb` notebook
+10.  Now you are ready to go through the rest of the cells in `notebook/mlops.ipynb`
 
-![code-pipeline](docs/stack-parameters.png)
-
-You can launch the same stack using the AWS CLI. Here's an example:
-
-`
- aws cloudformation create-stack --stack-name sagemaker-safe-deployment \
-   --template-body file://pipeline.yml \
-   --capabilities CAPABILITY_IAM \
-   --parameters \
-       ParameterKey=ModelName,ParameterValue=mymodelname \
-       ParameterKey=GitHubUser,ParameterValue=youremailaddress@example.com \
-       ParameterKey=GitHubToken,ParameterValue=YOURGITHUBTOKEN12345ab1234234
-`
 
 ###  Start, Test and Approve the Deployment
 
@@ -81,15 +73,11 @@ Once the deployment is complete, there will be a new AWS CodePipeline created, w
 
 ![code-pipeline](docs/data-source-before.png)
 
-Launch the newly created SageMaker Notebook in your [AWS console](https://aws.amazon.com/getting-started/hands-on/build-train-deploy-machine-learning-model-sagemaker/), navigate to the `notebook` directory and opening the notebook by clicking on the `mlops.ipynb` link.
-
-![code-pipeline](docs/sagemaker-notebook.png)
-
 Once the notebook is running, you will be guided through a series of steps starting with downloading the  [New York City Taxi](https://registry.opendata.aws/nyc-tlc-trip-records-pds/) dataset, uploading this to an Amazon SageMaker S3 bucket along with the data source meta data to trigger a new build in the AWS CodePipeline.
 
 ![code-pipeline](docs/datasource-after.png)
 
-Once your pipeline is kicked off it will run model training and deploy a development SageMaker Endpoint.  
+Once your pipeline is kicked off it will run model training and deploy a development SageMaker Endpoint.
 
 There is a manual approval step which you can action directly within the SageMaker Notebook to promote this to production, send some traffic to the live endpoint and create a REST API.
 
@@ -138,15 +126,16 @@ This project is written in Python, and design to be customized for your own mode
 │   ├── buildspec.yml
 │   ├── dashboard.json
 │   ├── requirements.txt
-│   └── run.py
+│   └── run_pipeline.py
 ├── notebook
-│   ├── canary.js
 │   ├── dashboard.json
 │   └── mlops.ipynb
-└── pipeline.yml
+├── build.sh
+├── pipeline.yml
+└── studio.yml
 ```
 
-Edit the `get_training_params` method in the `model/run.py` script that is run as part of the AWS CodeBuild step to add your own estimator or model definition.
+Edit the `get_training_params` method in the `model/run_pipeline.py` script that is run as part of the AWS CodeBuild step to add your own estimator or model definition.
 
 Extend the AWS Lambda hooks in `api/pre_traffic_hook.py` and `api/post_traffic_hook.py` to add your own validation or inference against the deployed Amazon SageMaker endpoints. You can also edit the `api/app.py` lambda to add any enrichment or transformation to the request/response payload.
 
@@ -158,8 +147,7 @@ This section outlines cost considerations for running the SageMaker Safe Deploym
 - **CodeCommit** – $1/month if you didn't opt to use your own GitHub repository.
 - **CodeDeploy** – No cost with AWS Lambda.
 - **CodePipeline** – CodePipeline costs $1 per active pipeline* per month. Pipelines are free for the first 30 days after creation. More can be found at [AWS CodePipeline Pricing](https://aws.amazon.com/codepipeline/pricing/).
-- **CloudWatch** - This template includes a [Canary](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html), 1 dashboard and 4 alarms (2 for deployment, 1 for model drift and 1 for canary) which costs less than $10 per month.
-  - Canaries cost $0.0012 per run, or $5/month if they run every 10 minutes.
+- **CloudWatch** - This template includes 1 dashboard and 3 alarms (2 for deployment and 1 for model drift) which costs less than $10 per month.
   - Dashboards cost $3/month.
   - Alarm metrics cost $0.10 per alarm.
 - **CloudTrail** - Low cost, $0.10 per 100,000 data events to enable [S3 CloudWatch Event](https://docs.aws.amazon.com/codepipeline/latest/userguide/create-cloudtrail-S3-source-console.html).  For more information, see [AWS CloudTrail Pricing](https://aws.amazon.com/cloudtrail/pricing/)
@@ -170,7 +158,7 @@ This section outlines cost considerations for running the SageMaker Safe Deploym
   - The `ml.t3.medium` instance *notebook* costs $0.0582 an hour.
   - The `ml.m4.xlarge` instance for the *training* job costs $0.28 an hour.
   - The `ml.m5.xlarge` instance for the *monitoring* baseline costs $0.269 an hour.
-  - The `ml.t2.medium` instance for the dev *hosting* endpoint costs $0.065 an hour. 
+  - The `ml.t2.medium` instance for the dev *hosting* endpoint costs $0.065 an hour.
   - The two `ml.m5.large` instances for production *hosting* endpoint costs 2 x $0.134 per hour.
   - The `ml.m5.xlarge` instance for the hourly scheduled *monitoring* job costs $0.269 an hour.
 - **S3** – Prices will vary depending on the size of the model/artifacts stored. The first 50 TB each month will cost only $0.023 per GB stored. For more information, see [Amazon S3 Pricing](https://aws.amazon.com/s3/pricing/).
@@ -193,4 +181,3 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This library is licensed under the MIT-0 License. See the LICENSE file.
-

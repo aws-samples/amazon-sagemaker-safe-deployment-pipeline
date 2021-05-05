@@ -22,7 +22,10 @@ def create_experiment_step(create_experiment_function_name):
         "Create Experiment",
         parameters={
             "FunctionName": create_experiment_function_name,
-            "Payload": {"ExperimentName.$": "$.ExperimentName", "TrialName.$": "$.TrialName",},
+            "Payload": {
+                "ExperimentName.$": "$.ExperimentName",
+                "TrialName.$": "$.TrialName",
+            },
         },
         result_path="$.CreateTrialResults",
     )
@@ -305,6 +308,7 @@ def main(
     kms_key_id,
     workflow_role_arn,
     notification_arn,
+    tags,
 ):
     # Define the function names
     create_experiment_function_name = "mlops-create-experiment"
@@ -341,7 +345,7 @@ def main(
     # Set the output Data
     output_data = {
         "ModelOutputUri": "s3://{}/{}".format(sagemaker_bucket, model_name),
-        "BaselineOutputUri": f"s3://{sagemaker_bucket}/{model_name}/monitoring/baseline/mlops-{model_name}-pbl-{job_id}",
+        "BaselineOutputUri": f"s3://{sagemaker_bucket}/{model_name}/monitoring/baseline/{model_name}-pbl-{job_id}",
     }
     print("model output uri: {}".format(output_data["ModelOutputUri"]))
 
@@ -401,14 +405,14 @@ def main(
     # Write the workflow inputs to file
     with open(os.path.join(output_dir, "workflow-input.json"), "w") as f:
         workflow_inputs = {
-            "ExperimentName": "mlops-{}".format(model_name),
-            "TrialName": "mlops-{}-{}".format(model_name, job_id),
+            "ExperimentName": "{}".format(model_name),
+            "TrialName": "{}-{}".format(model_name, job_id),
             "GitBranch": git_branch,
             "GitCommitHash": git_commit_id,
             "DataVersionId": data_verison_id,
-            "BaselineJobName": "mlops-{}-pbl-{}".format(model_name, job_id),
+            "BaselineJobName": "{}-pbl-{}".format(model_name, job_id),
             "BaselineOutputUri": output_data["BaselineOutputUri"],
-            "TrainingJobName": "mlops-{}-{}".format(model_name, job_id),
+            "TrainingJobName": "{}-{}".format(model_name, job_id),
         }
         json.dump(workflow_inputs, f)
 
@@ -425,6 +429,20 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Load parameters")
+    parser.add_argument(
+        "-role-arn",
+        "--role-arn",
+        dest="sagemaker_role",
+        type=str,
+        help="The role arn for the pipeline service execution role.",
+    )
+    parser.add_argument(
+        "-tags",
+        "--tags",
+        dest="tags",
+        default=None,
+        help="""List of dict strings of '[{"Key": "string", "Value": "string"}, ..]'""",
+    )
     parser.add_argument("--codebuild-id", required=True)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--output-dir", required=True)

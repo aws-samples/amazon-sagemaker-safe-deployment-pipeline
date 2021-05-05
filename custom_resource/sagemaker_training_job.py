@@ -53,7 +53,7 @@ def poll_create(event, context):
 @helper.poll_delete
 def poll_delete(event, context):
     """
-    Return true if the resource has been stopped.  
+    Return true if the resource has been stopped.
     """
     training_job_name = get_training_job_name(event)
     logger.info("Polling for stopped training job: %s", training_job_name)
@@ -87,9 +87,7 @@ def is_training_job_ready(training_job_name):
         )
     else:
         raise Exception(
-            "Training job ({}) has unexpected status: {}".format(
-                training_job_name, status
-            )
+            "Training job ({}) has unexpected status: {}".format(training_job_name, status)
         )
 
     return is_ready
