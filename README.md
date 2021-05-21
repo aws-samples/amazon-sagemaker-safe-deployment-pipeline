@@ -34,7 +34,6 @@ The following is the list of steps required to get up and running with this samp
 ###  Requirements
 
 * Create your AWS account at [http://aws.amazon.com](http://aws.amazon.com) by following the instructions on the site.
-* Install [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) with appropriate IAM permissions
 * A Studio user account, see [onboard to Amazon SageMaker Studio](https://docs.aws.amazon.com/sagemaker/latest/dg/gs-studio-onboard.html)
 ###  Enable Amazon SageMaker Studio Project
 
@@ -44,12 +43,24 @@ The following is the list of steps required to get up and running with this samp
   <img src="docs/studio-execution-role.png" alt="role" width="800" height="400"/>
 </p>
 
-2. Use the provided `build.sh` as follows
+2. Click on the launch button below to setup the stack
+
+<p align="center">
+  <a href="https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateUrl=https%3A%2F%2Famazon-sagemaker-safe-deployment-pipeline.s3.amazonaws.com%2Fstudio.yml&stackName=mlops-studio&param_PipelineBucket=amazon-sagemaker-safe-deployment-pipeline"><img src="https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png" width="250" height="50"></a>
+</p>
+
+and paste the role name copied in step 1 as the value of the parameter `SageMakerStudioRoleName` as shown below and click **Create Stack**
+
+<p align="center">
+  <img src="docs/studio-cft.png" alt="role" width="400" height="600"/>
+</p>
+
+*Alternatively*, one can use the provided `scripts/build.sh` (which required [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) installed with appropriate IAM permissions) as follows
 ```
-# bash build.sh S3_BUCKET_NAME STACK_NAME REGION STUDIO_ROLE_NAME
+# bash scripts/build.sh S3_BUCKET_NAME STACK_NAME REGION STUDIO_ROLE_NAME
 # REGION should match your default AWS CLI region
 # STUDIO_ROLE_NAME is copied from step 1. Example:
-bash build.sh example-studio example-pipeline us-east-1 AmazonSageMaker-ExecutionRole-20210112T085906
+bash scripts/build.sh example-studio example-pipeline us-east-1 AmazonSageMaker-ExecutionRole-20210112T085906
 ```
 
 3. From the AWS console navigate to `cloudformation` and once the stack `STACK_NAME` is ready
@@ -129,8 +140,12 @@ This project is written in Python, and design to be customized for your own mode
 │   └── run_pipeline.py
 ├── notebook
 │   ├── dashboard.json
+|   ├── workflow.ipynb
 │   └── mlops.ipynb
-├── build.sh
+├── scripts
+|   ├── build.sh
+|   ├── lint.sh
+|   └── set_kernelspec.py
 ├── pipeline.yml
 └── studio.yml
 ```

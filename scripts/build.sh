@@ -21,19 +21,23 @@ aws cloudformation delete-stack --stack-name "$STACK_NAME"
 
 rm -rf build
 mkdir build
-rsync -av --progress . build --exclude build --exclude "*.git*"
+rsync -av --progress . build \
+    --exclude build \
+    --exclude "*.git*" \
+    --exclude .pre-commit-config.yaml
 cd build
 # binding resources of pipeline.yml and studio.yml together with common PREFIX
 sed -i -e "s/PROJECT_PREFIX/$PREFIX/g" assets/*.yml pipeline.yml
 sed -i -e "s/S3_BUCKET_NAME/$BUCKET/g" pipeline.yml
+find . -type f -iname "*.yml-e" -delete
 
-python -m pip install black==20.8b1 black-nb -q
-black .
-black-nb --exclude "/(outputs|\.ipynb_checkpoints)/" notebook/mlops.ipynb # workflow.ipynb fails
+bash scripts/lint.sh || exit 1
+
+rm -rf scripts # used in development only
 
 zip -r project.zip .
 
-aws s3api create-bucket --bucket "$BUCKET" --region "$REGION"
+aws s3 mb "s3://$BUCKET" --region "$REGION"
 aws s3 cp --region "$REGION" project.zip "s3://$BUCKET/"
 aws s3 cp --region "$REGION" pipeline.yml "s3://$BUCKET/"
 aws s3 cp --region "$REGION" studio.yml "s3://$BUCKET/"

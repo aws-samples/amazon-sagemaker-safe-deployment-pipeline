@@ -239,7 +239,7 @@ def create_graph(create_experiment_step, baseline_step, training_step):
     return steps.states.Chain([create_experiment_step, sagemaker_jobs])
 
 
-def get_dev_config(model_name, job_id, role, image_uri, kms_key_id):
+def get_dev_config(model_name, job_id, role, image_uri, kms_key_id, sagemaker_project_id):
     return {
         "Parameters": {
             "ImageRepoUri": image_uri,
@@ -249,21 +249,27 @@ def get_dev_config(model_name, job_id, role, image_uri, kms_key_id):
             "ModelVariant": "dev",
             "KmsKeyId": kms_key_id,
         },
-        "Tags": {"mlops:model-name": model_name, "mlops:stage": "dev"},
+        "Tags": {
+            "mlops:model-name": model_name,
+            "mlops:stage": "dev",
+            "SageMakerProjectId": sagemaker_project_id,
+        },
     }
 
 
-def get_prd_config(model_name, job_id, role, image_uri, kms_key_id, notification_arn):
-    dev_config = get_dev_config(model_name, job_id, role, image_uri, kms_key_id)
+def get_prd_config(
+    model_name, job_id, role, image_uri, kms_key_id, notification_arn, sagemaker_project_id
+):
+    dev_config = get_dev_config(
+        model_name, job_id, role, image_uri, kms_key_id, sagemaker_project_id
+    )
     prod_params = {
         "ModelVariant": "prd",
         "ScheduleMetricName": "feature_baseline_drift_total_amount",
         "ScheduleMetricThreshold": str("0.20"),
         "NotificationArn": notification_arn,
     }
-    prod_tags = {
-        "mlops:stage": "prd",
-    }
+    prod_tags = {"mlops:stage": "prd", "SageMakerProjectId": sagemaker_project_id}
     return {
         "Parameters": dict(dev_config["Parameters"], **prod_params),
         "Tags": dict(dev_config["Tags"], **prod_tags),
@@ -308,6 +314,7 @@ def main(
     kms_key_id,
     workflow_role_arn,
     notification_arn,
+    sagemaker_project_id,
     tags,
 ):
     # Define the function names
@@ -388,7 +395,7 @@ def main(
 
     # Create the workflow as the model name
     workflow = Workflow(model_name, workflow_definition, workflow_role_arn)
-    print("Creating workflow: {}".format(model_name))
+    print("Creating workflow: {0}-{1}".format(model_name, sagemaker_project_id))
 
     # Create output directory
     if not os.path.exists(output_dir):
@@ -418,11 +425,19 @@ def main(
 
     # Write the dev & prod params for CFN
     with open(os.path.join(output_dir, "deploy-model-dev.json"), "w") as f:
-        config = get_dev_config(model_name, job_id, deploy_role, image_uri, kms_key_id)
+        config = get_dev_config(
+            model_name, job_id, deploy_role, image_uri, kms_key_id, sagemaker_project_id
+        )
         json.dump(config, f)
     with open(os.path.join(output_dir, "deploy-model-prd.json"), "w") as f:
         config = get_prd_config(
-            model_name, job_id, deploy_role, image_uri, kms_key_id, notification_arn
+            model_name,
+            job_id,
+            deploy_role,
+            image_uri,
+            kms_key_id,
+            notification_arn,
+            sagemaker_project_id,
         )
         json.dump(config, f)
 
@@ -456,6 +471,7 @@ if __name__ == "__main__":
     parser.add_argument("--git-branch", required=True)
     parser.add_argument("--workflow-role-arn", required=True)
     parser.add_argument("--notification-arn", required=True)
+    parser.add_argument("--sagemaker-project-id", required=True)
     args = vars(parser.parse_args())
     print("args: {}".format(args))
     main(**args)

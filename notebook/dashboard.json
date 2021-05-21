@@ -343,23 +343,6 @@
                 "view": "timeSeries",
                 "stacked": false
             }
-        },
-        {
-            "type": "metric",
-            "x": 16,
-            "y": 20,
-            "width": 8,
-            "height": 7,
-            "properties": {
-                "title": "CloudWatch Synthetics Alarm",
-                "annotations": {
-                    "alarms": [
-                        "arn:aws:cloudwatch:${region}:${account_id}:alarm:mlops-${model_name}-synth-lt-threshold"
-                    ]
-                },
-                "view": "timeSeries",
-                "stacked": false
-            }
         }
     ]
 }

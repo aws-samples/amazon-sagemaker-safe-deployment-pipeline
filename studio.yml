@@ -110,6 +110,7 @@ Resources:
             - "codepipeline:GetPipeline"
             - "codepipeline:GetPipelineState"
             - "codepipeline:TagResource"
+            - "codepipeline:StartPipelineExecution"
             Resource:
               - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectPrefix}-*"
           - Effect: Allow
@@ -172,20 +173,29 @@ Resources:
             - "states:DescribeStateMachine"
             - "states:ListExecutions"
             - "states:GetExecutionHistory"
+            - "states:CreateStateMachine"
+            - "states:StartExecution"
+            - "states:DescribeExecution"
+            - "states:DeleteStateMachine"
             Resource:
               - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:*:${ProjectPrefix}-*"
           - Effect: Allow
             Action:
             - "cloudwatch:PutDashboard"
+            - "cloudwatch:GetDashboard"
             - "cloudwatch:DeleteAlarms"
             - "cloudwatch:DeleteDashboards"
             Resource:
               - !Sub "arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${ProjectPrefix}-*"
           - Effect: Allow
             Action:
-            - "synthetics:*"
+            - "cloudwatch:PutMetricData"
+            - "cloudwatch:GetMetricStatistics"
             Resource:
-              - !Sub "arn:aws:synthetics:${AWS::Region}:${AWS::AccountId}:${ProjectPrefix}-*"
+              "*"
+            Condition:
+              StringEquals:
+                cloudwatch:namespace: "aws/sagemaker/Endpoints/data-metrics"
           - Effect: Allow
             Action:
             - "lambda:CreateFunction"

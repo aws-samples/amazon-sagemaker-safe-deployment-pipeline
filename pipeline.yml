@@ -337,7 +337,7 @@ Resources:
                 ActionMode: REPLACE_ON_FAILURE
                 RoleArn: !GetAtt DeployRole.Arn
                 Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
-                StackName: !Sub ${ProjectPrefix}-sagemaker-custom-resource # Use global name to re-use across templates
+                StackName: !Sub ${ProjectPrefix}-${ModelName}-${SageMakerProjectId}-sagemaker-custom-resource # Use global name to re-use across templates
                 TemplatePath: BuildOutput::packaged-custom-resource.yml
               RunOrder: 2
         - Name: Train
@@ -431,6 +431,7 @@ Resources:
   S3EventRule:
     Type: AWS::Events::Rule
     Properties:
+      Name: !Sub ${ProjectPrefix}-${ModelName}-${SageMakerProjectId}-s3-event-rule
       EventPattern:
         source:
           - aws.s3
@@ -465,7 +466,7 @@ Resources:
           - "CloudWatch Alarm State Change"
         detail:
           alarmName:
-            - !Sub ${ProjectPrefix}-${ModelName}-${SageMakerProjectId}-metric-gt-threshold
+            - !Sub ${ProjectPrefix}-${ModelName}-metric-gt-threshold
           state:
             value:
               - "ALARM"
@@ -473,15 +474,18 @@ Resources:
         - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipeline}"
           RoleArn: !GetAtt CloudWatchEventRole.Arn
           Id: !Sub codepipeline-${DeployPipeline}
-        - Arn: !Ref NotificationTopic
-          Id: "RetrainRule"
-          InputTransformer:
-            InputPathsMap:
-                alarmName: $.detail.alarmName
-                reason: $.detail.state.reason
-            InputTemplate: |
-                "The retrain rule for alarm: <alarmName> has been triggered."
-                "Reason: <reason>."
+        # TODO: Studio doesn't accept empty CFT parameter so the SNS email
+        # if not verified prevents the retraining to complete
+        # enable SNS when studio accepts empty parameter
+        # - Arn: !Ref NotificationTopic
+        #   Id: "RetrainRule"
+        #   InputTransformer:
+        #     InputPathsMap:
+        #         alarmName: $.detail.alarmName
+        #         reason: $.detail.state.reason
+        #     InputTemplate: |
+        #         "The retrain rule for alarm: <alarmName> has been triggered."
+        #         "Reason: <reason>."
 
   ScheduledRule:
     Type: AWS::Events::Rule
@@ -716,7 +720,6 @@ Resources:
                   - cloudformation:*
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ProjectPrefix}-${ModelName}*
-                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ProjectPrefix}-sagemaker-custom-resource*
               - Sid: AllowCloudWatch
                 Effect: Allow
                 Action:
@@ -956,6 +959,8 @@ Outputs:
     Value: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ProjectPrefix}-${ModelName}"
   WorkflowRoleARN:
     Value: !GetAtt WorkflowExecutionRole.Arn
+  SageMakerRoleARN:
+    Value: !GetAtt SageMakerRole.Arn
   Region:
     Value: !Ref AWS::Region
   KMSKey:
