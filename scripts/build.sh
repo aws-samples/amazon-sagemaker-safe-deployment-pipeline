@@ -12,8 +12,8 @@ if [ $# -lt 4 ]; then
 fi
 
 PREFIX="mlops" # should match the ProjectPrefix parameter in pipeline.yml and studio.yml additional ARN privileges
-BUCKET="$PREFIX-$1"
-STACK_NAME="$PREFIX-$2"
+BUCKET="$1"
+STACK_NAME="$2"
 REGION=$3
 ROLE=$4
 
@@ -38,9 +38,9 @@ rm -rf scripts # used in development only
 zip -r project.zip .
 
 aws s3 mb "s3://$BUCKET" --region "$REGION"
-aws s3 cp --region "$REGION" project.zip "s3://$BUCKET/"
-aws s3 cp --region "$REGION" pipeline.yml "s3://$BUCKET/"
-aws s3 cp --region "$REGION" studio.yml "s3://$BUCKET/"
+aws s3 cp --region "$REGION" project.zip "s3://$BUCKET/" --acl public-read
+aws s3 cp --region "$REGION" pipeline.yml "s3://$BUCKET/" --acl public-read
+aws s3 cp --region "$REGION" studio.yml "s3://$BUCKET/" --acl public-read
 
 aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME"
 
