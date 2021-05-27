@@ -81,10 +81,10 @@ Resources:
   Model:
     Type: "AWS::SageMaker::Model"
     Properties:
-      ModelName: !Sub mlops-${ModelName}-prd-${TrainJobId}
+      ModelName: !Sub ${ModelName}-prd-${TrainJobId}
       PrimaryContainer:
         Image: !Ref ImageRepoUri
-        ModelDataUrl: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/mlops-${ModelName}-${TrainJobId}/output/model.tar.gz
+        ModelDataUrl: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/${ModelName}-${TrainJobId}/output/model.tar.gz
       ExecutionRoleArn: !Ref DeployRoleArn
 
   EndpointConfig:
@@ -109,19 +109,19 @@ Resources:
         EnableCapture: True
         InitialSamplingPercentage: 100
         KmsKeyId: !Ref KmsKeyId
-      EndpointConfigName: !Sub mlops-${ModelName}-pec-${TrainJobId}
+      EndpointConfigName: !Sub ${ModelName}-pec-${TrainJobId}
       KmsKeyId: !Ref KmsKeyId
 
   Endpoint:
     Type: "AWS::SageMaker::Endpoint"
     Properties:
-      EndpointName: !Sub mlops-${ModelName}-prd-${TrainJobId}
+      EndpointName: !Sub ${ModelName}-prd-${TrainJobId}
       EndpointConfigName: !GetAtt EndpointConfig.EndpointConfigName
 
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub mlops-${ModelName}-api
+      FunctionName: !Sub ${ModelName}-api
       CodeUri: ../api
       Handler: app.lambda_handler
       Runtime: python3.7
@@ -177,7 +177,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - sagemaker:InvokeEndpoint
-                Resource: "arn:aws:sagemaker:*:*:endpoint/mlops-*"
+                Resource: "arn:aws:sagemaker:*:*:endpoint/*"
               - Sid: AlowSNS
                 Effect: Allow
                 Action:
@@ -205,7 +205,7 @@ Resources:
                 - sagemaker:DescribeEndpointConfig
                 - sagemaker:InvokeEndpoint
               Resource:
-                - "arn:aws:sagemaker:*:*:*/mlops-*"
+                - "arn:aws:sagemaker:*:*:*/*"
             - Sid: AllowCodeDeploy
               Effect: Allow
               Action:
@@ -261,9 +261,9 @@ Resources:
         MonitoringJobDefinition:
           BaselineConfig:
             ConstraintsResource:
-              S3Uri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/constraints.json
+              S3Uri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/${ModelName}-pbl-${TrainJobId}/constraints.json
             StatisticsResource:
-              S3Uri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/mlops-${ModelName}-pbl-${TrainJobId}/statistics.json
+              S3Uri: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/monitoring/baseline/${ModelName}-pbl-${TrainJobId}/statistics.json
           MonitoringAppSpecification:
             ImageUri:
               !FindInMap [ModelAnalyzerMap, !Ref "AWS::Region", "ImageUri"]
@@ -287,19 +287,19 @@ Resources:
             MaxRuntimeInSeconds: 1800
         ScheduleConfig:
           ScheduleExpression: "cron(0 * ? * * *)"
-      MonitoringScheduleName: !Sub mlops-${ModelName}-pms
+      MonitoringScheduleName: !Sub ${ModelName}-pms
 
   SagemakerScheduleAlarm:
     Type: "AWS::CloudWatch::Alarm"
     Properties:
-      AlarmName: !Sub mlops-${ModelName}-metric-gt-threshold
+      AlarmName: !Sub ${ModelName}-metric-gt-threshold
       AlarmDescription: Schedule Metric > Threshold
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: Endpoint
           Value: !GetAtt Endpoint.EndpointName
         - Name: MonitoringSchedule
-          Value: !Sub mlops-${ModelName}-pms
+          Value: !Sub ${ModelName}-pms
       EvaluationPeriods: 1
       DatapointsToAlarm: 1
       MetricName: !Ref ScheduleMetricName
@@ -311,7 +311,7 @@ Resources:
   AliasErrorMetricGreaterThanZeroAlarm:
     Type: "AWS::CloudWatch::Alarm"
     Properties:
-      AlarmName: !Sub mlops-${ModelName}-alias-gt-zero
+      AlarmName: !Sub ${ModelName}-alias-gt-zero
       AlarmDescription: Lambda Function Error > 0
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
@@ -329,7 +329,7 @@ Resources:
   LatestVersionErrorMetricGreaterThanZeroAlarm:
     Type: "AWS::CloudWatch::Alarm"
     Properties:
-      AlarmName: !Sub mlops-${ModelName}-version-gt-zero
+      AlarmName: !Sub ${ModelName}-version-gt-zero
       AlarmDescription: Lambda Function Error > 0
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
@@ -351,7 +351,7 @@ Resources:
     Properties:
       MaxCapacity: 10
       MinCapacity: 2
-      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
+      ResourceId: !Sub endpoint/${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
       RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
@@ -362,7 +362,7 @@ Resources:
     Properties:
       PolicyName: SageMakerVariantInvocationsPerInstance
       PolicyType: TargetTrackingScaling
-      ResourceId: !Sub endpoint/mlops-${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
+      ResourceId: !Sub endpoint/${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
       TargetTrackingScalingPolicyConfiguration:

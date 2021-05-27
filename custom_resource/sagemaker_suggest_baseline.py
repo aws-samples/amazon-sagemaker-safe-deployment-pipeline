@@ -53,7 +53,7 @@ def poll_create(event, context):
 @helper.poll_delete
 def poll_delete(event, context):
     """
-    Return true if the resource has been stopped.  
+    Return true if the resource has been stopped.
     """
     processing_job_name = get_processing_job_name(event)
     logger.info("Polling for stopped processing job: %s", processing_job_name)
@@ -64,9 +64,7 @@ def poll_delete(event, context):
 
 
 def get_model_monitor_container_uri(region):
-    container_uri_format = (
-        "{0}.dkr.ecr.{1}.amazonaws.com/sagemaker-model-monitor-analyzer"
-    )
+    container_uri_format = "{0}.dkr.ecr.{1}.amazonaws.com/sagemaker-model-monitor-analyzer"
 
     regions_to_accounts = {
         "eu-north-1": "895015795356",
@@ -113,9 +111,7 @@ def is_processing_job_ready(processing_job_name):
         )
     else:
         raise Exception(
-            "Processing Job ({}) has unexpected status: {}".format(
-                processing_job_name, status
-            )
+            "Processing Job ({}) has unexpected status: {}".format(processing_job_name, status)
         )
 
     return is_ready
@@ -140,9 +136,7 @@ def create_processing_job(event):
 
 def stop_processing_job(processing_job_name):
     try:
-        processing_job = sm.describe_processing_job(
-            ProcessingJobName=processing_job_name
-        )
+        processing_job = sm.describe_processing_job(ProcessingJobName=processing_job_name)
         status = processing_job["ProcessingJobStatus"]
         if status == "InProgress":
             logger.info("Stopping InProgress processing job: %s", processing_job_name)
@@ -165,8 +159,7 @@ def stop_processing_job(processing_job_name):
 
 
 class DatasetFormat(object):
-    """Represents a Dataset Format that is used when calling a DefaultModelMonitor.
-    """
+    """Represents a Dataset Format that is used when calling a DefaultModelMonitor."""
 
     @staticmethod
     def csv(header=True, output_columns_position="START"):
@@ -203,9 +196,7 @@ class DatasetFormat(object):
             dict: JSON string containing DatasetFormat to be used by DefaultModelMonitor.
         """
         return {
-            "sagemaker_capture_json": {
-                "captureIndexNames": ["endpointInput", "endpointOutput"]
-            }
+            "sagemaker_capture_json": {"captureIndexNames": ["endpointInput", "endpointOutput"]}
         }
 
 
@@ -256,22 +247,16 @@ def get_processing_request(event, dataset_format=DatasetFormat.csv()):
             }
         },
         "StoppingCondition": {
-            "MaxRuntimeInSeconds": int(
-                props.get("MaxRuntimeInSeconds", 1800)
-            )  # 30 minutes
+            "MaxRuntimeInSeconds": int(props.get("MaxRuntimeInSeconds", 1800))  # 30 minutes
         },
         "AppSpecification": {
-            "ImageUri": props.get(
-                "ImageURI", get_model_monitor_container_uri(helper._region)
-            ),
+            "ImageUri": props.get("ImageURI", get_model_monitor_container_uri(helper._region)),
         },
         "Environment": {
             "dataset_format": json.dumps(dataset_format),
             "dataset_source": "/opt/ml/processing/input/baseline_dataset_input",
             "output_path": "/opt/ml/processing/output",
-            "publish_cloudwatch_metrics": props.get(
-                "PublishCloudwatchMetrics", "Disabled"
-            ),
+            "publish_cloudwatch_metrics": props.get("PublishCloudwatchMetrics", "Disabled"),
         },
         "RoleArn": props["PassRoleArn"],
     }
@@ -279,9 +264,7 @@ def get_processing_request(event, dataset_format=DatasetFormat.csv()):
     # Add the KmsKeyId to monitoring outputs and cluster volume if provided
     if props.get("KmsKeyId") is not None:
         request["ProcessingOutputConfig"]["KmsKeyId"] = props["KmsKeyId"]
-        request["ProcessingResources"]["ClusterConfig"]["VolumeKmsKeyId"] = props[
-            "KmsKeyId"
-        ]
+        request["ProcessingResources"]["ClusterConfig"]["VolumeKmsKeyId"] = props["KmsKeyId"]
 
     # Add experiment tracking
     request["ExperimentConfig"] = {
@@ -295,9 +278,7 @@ def get_processing_request(event, dataset_format=DatasetFormat.csv()):
     if props.get("RecordPreprocessorSourceUri"):
         env = request["Environment"]
         fn = get_file_name(props["RecordPreprocessorSourceUri"])
-        env["record_preprocessor_script"] = (
-            "/opt/ml/processing/code/postprocessing/" + fn
-        )
+        env["record_preprocessor_script"] = "/opt/ml/processing/code/postprocessing/" + fn
         request["ProcessingInputs"].append(
             {
                 "InputName": "pre_processor_script",
@@ -315,9 +296,7 @@ def get_processing_request(event, dataset_format=DatasetFormat.csv()):
     if props.get("PostAnalyticsProcessorSourceUri"):
         env = request["Environment"]
         fn = get_file_name(props["PostAnalyticsProcessorSourceUri"])
-        env["post_analytics_processor_script"] = (
-            "/opt/ml/processing/code/postprocessing/" + fn
-        )
+        env["post_analytics_processor_script"] = "/opt/ml/processing/code/postprocessing/" + fn
         request["ProcessingInputs"].append(
             {
                 "InputName": "post_processor_script",
@@ -339,9 +318,7 @@ def get_processing_request(event, dataset_format=DatasetFormat.csv()):
         # Add baseline constraints
         logger.debug("Update with constraints: %s", data["BaselineConstraintsUri"])
         env = request["Environment"]
-        env[
-            "baseline_constraints"
-        ] = "/opt/ml/processing/baseline/constraints/constraints.json"
+        env["baseline_constraints"] = "/opt/ml/processing/baseline/constraints/constraints.json"
         request["ProcessingInputs"].append(
             {
                 "InputName": "constraints",

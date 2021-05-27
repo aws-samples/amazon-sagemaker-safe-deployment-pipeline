@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Description: |
+      Unique prefix to make resource privileges scoped-limited.
+      Changing the default must be done with care
+    Default: mlops
+  SageMakerStudioRoleName:
+    Type: String
+    Description: Name of the role used by SageMaker Studio
+    MinLength: 1
+    AllowedPattern: ^[a-zA-Z](-*[a-zA-Z0-9])*
+  PortfolioName:
+    Type: String
+    Default: SageMaker Safe Deployment Pipeline Templates
+  TemplateName:
+    Type: String
+    Default: SageMaker Safe Deployment Pipeline
+  PipelineBucket:
+    Type: String
+    Default: S3 bucket to store the pipeline cloudformation template
+
+Resources:
+  SageMakerStudioOrganizationProjectsPortfolio:
+    Type: AWS::ServiceCatalog::Portfolio
+    Properties:
+      Description: "Creates a new portfolio with a template for SageMakerProjects"
+      DisplayName: !Ref PortfolioName
+      ProviderName: "SageMaker Safe Deployment Pipeline Templates"
+
+  SageMakerSafeDeploymentProduct:
+    Type: AWS::ServiceCatalog::CloudFormationProduct
+    Properties:
+      Description: Deploys the template for creating a new SageMaker setup
+      Name: !Ref TemplateName
+      Owner: MLOps
+      ProvisioningArtifactParameters:
+        - Description: "SageMaker Safe Deployment Pipeline Project Templates"
+          DisableTemplateValidation: false
+          Info:
+            LoadTemplateFromURL: !Sub "https://${PipelineBucket}.s3.${AWS::Region}.amazonaws.com/pipeline.yml"
+      Tags:
+        - Key: sagemaker:studio-visibility
+          Value: "true"
+
+  LaunchRoleConstraint:
+    Type: AWS::ServiceCatalog::LaunchRoleConstraint
+    Properties:
+      Description: "This is a launch constraint restriction for the SageMaker Launch Role"
+      PortfolioId: !Ref SageMakerStudioOrganizationProjectsPortfolio
+      ProductId: !Ref SageMakerSafeDeploymentProduct
+      RoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AmazonSageMakerServiceCatalogProductsLaunchRole"
+    DependsOn:
+      - ProductAssociation
+      - AdditionalPrivilegesForStudio
+
+  PrincipalAssociation:
+    Type: AWS::ServiceCatalog::PortfolioPrincipalAssociation
+    Properties:
+      PortfolioId: !Ref SageMakerStudioOrganizationProjectsPortfolio
+      PrincipalType: IAM
+      PrincipalARN: !Sub arn:aws:iam::${AWS::AccountId}:role/${SageMakerStudioRoleName}
+
+  ProductAssociation:
+    Type: AWS::ServiceCatalog::PortfolioProductAssociation
+    Properties:
+      PortfolioId: !Ref SageMakerStudioOrganizationProjectsPortfolio
+      ProductId: !Ref SageMakerSafeDeploymentProduct
+
+  AdditionalPrivilegesForStudio:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SageMakerSafeDeploymentAdditional
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+            - "cloudtrail:*"
+            Resource:
+              - "*"
+          - Effect: Allow
+            Action:
+            - "cloudformation:DescribeStacks"
+            - "cloudformation:DescribeStackEvents"
+            - "cloudformation:DeleteStack"
+            Resource:
+              - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ProjectPrefix}-*"
+          - Effect: Allow
+            Action:
+            - "codecommit:CreateRepository"
+            - "codecommit:GetRepository"
+            - "codecommit:GetBranch"
+            - "codecommit:DeleteRepository"
+            - "codecommit:TagResource"
+            - "codecommit:CreateCommit"
+            Resource:
+              - !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:amazon-sagemaker-safe-deployment-pipeline*"
+          - Effect: Allow
+            Action:
+            - "codebuild:CreateProject"
+            - "codebuild:DeleteProject"
+            Resource:
+              - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${ProjectPrefix}-*"
+          - Effect: Allow
+            Action:
+            - "codepipeline:CreatePipeline"
+            - "codepipeline:DeletePipeline"
+            - "codepipeline:GetPipeline"
+            - "codepipeline:GetPipelineState"
+            - "codepipeline:TagResource"
+            - "codepipeline:StartPipelineExecution"
+            Resource:
+              - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectPrefix}-*"
+          - Effect: Allow
+            Action:
+            - "codepipeline:PutApprovalResult"
+            Resource:
+              - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectPrefix}-*/DeployDev/ApproveDeploy"
+          - Effect: Allow
+            Action:
+            - "kms:*"
+            Resource:
+            - "*"
+          - Effect: Allow
+            Action:
+            - "iam:GetRole"
+            - "iam:PassRole"
+            - "iam:CreateRole"
+            - "iam:DeleteRole"
+            - "iam:GetRolePolicy"
+            - "iam:PutRolePolicy"
+            - "iam:AttachRolePolicy"
+            - "iam:DetachRolePolicy"
+            - "iam:DeleteRolePolicy"
+            - "iam:ListRoleTags"
+            - "iam:TagRole"
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectPrefix}-*"
+          - Effect: Allow
+            Action:
+            - "sns:GetTopicAttributes"
+            - "sns:SetTopicAttributes"
+            - "sns:CreateTopic"
+            - "sns:DeleteTopic"
+            - "sns:TagResource"
+            - "sns:UntagResource"
+            - "sns:Subscribe"
+            - "sns:Unsubscribe"
+            Resource:
+              !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${ProjectPrefix}-*"
+          - Effect: Allow
+            Action:
+            - "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${ProjectPrefix}-*"
+          - Effect: Allow
+            Action:
+            - "events:PutRule"
+            - "events:DescribeRule"
+            - "events:PutTargets"
+            Resource:
+              - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${ProjectPrefix}-*"
+              - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/SC-${AWS::AccountId}*"
+          - Effect: Allow
+            Action:
+            - "servicecatalog:GetProvisionedProductOutputs"
+            Resource:
+              - !Sub "arn:aws:servicecatalog:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Action:
+            - "states:DescribeStateMachine"
+            - "states:ListExecutions"
+            - "states:GetExecutionHistory"
+            - "states:CreateStateMachine"
+            - "states:StartExecution"
+            - "states:DescribeExecution"
+            - "states:DeleteStateMachine"
+            Resource:
+              - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:*:${ProjectPrefix}-*"
+          - Effect: Allow
+            Action:
+            - "cloudwatch:PutDashboard"
+            - "cloudwatch:GetDashboard"
+            - "cloudwatch:DeleteAlarms"
+            - "cloudwatch:DeleteDashboards"
+            Resource:
+              - !Sub "arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${ProjectPrefix}-*"
+          - Effect: Allow
+            Action:
+            - "cloudwatch:PutMetricData"
+            - "cloudwatch:GetMetricStatistics"
+            Resource:
+              "*"
+            Condition:
+              StringEquals:
+                cloudwatch:namespace: "aws/sagemaker/Endpoints/data-metrics"
+          - Effect: Allow
+            Action:
+            - "lambda:CreateFunction"
+            - "lambda:InvokeFunction"
+            - "lambda:PublishLayerVersion"
+            Resource:
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:*:${ProjectPrefix}-*"
+      Roles:
+        - !Ref SageMakerStudioRoleName
+        - AmazonSageMakerServiceCatalogProductsLaunchRole

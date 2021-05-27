@@ -29,16 +29,9 @@ def lambda_handler(event, context):
         else:
             # Validate that endpoint config has data capture enabled
             endpoint_config_name = response["EndpointConfigName"]
-            response = sm.describe_endpoint_config(
-                EndpointConfigName=endpoint_config_name
-            )
-            if (
-                "DataCaptureConfig" in response
-                and response["DataCaptureConfig"]["EnableCapture"]
-            ):
-                logger.info(
-                    "data capture enabled for endpoint config %s", endpoint_config_name
-                )
+            response = sm.describe_endpoint_config(EndpointConfigName=endpoint_config_name)
+            if "DataCaptureConfig" in response and response["DataCaptureConfig"]["EnableCapture"]:
+                logger.info("data capture enabled for endpoint config %s", endpoint_config_name)
             else:
                 error_message = "SageMaker data capture not enabled for endpoint config"
             # TODO: Invoke endpoint if don't have canary / live traffic

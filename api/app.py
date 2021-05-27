@@ -50,8 +50,6 @@ def lambda_handler(event, context):
             "body": predictions,
         }
     except ClientError as e:
-        logger.error(
-            "Unexpected sagemaker error: {}".format(e.response["Error"]["Message"])
-        )
+        logger.error("Unexpected sagemaker error: {}".format(e.response["Error"]["Message"]))
         logger.error(e)
         return {"statusCode": 500, "message": "Unexpected sagemaker error"}

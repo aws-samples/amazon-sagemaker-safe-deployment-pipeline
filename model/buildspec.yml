@@ -6,7 +6,7 @@ phases:
       python: 3.7
     commands:
       - echo "Installing requirements"
-      - pip install -U boto3 awscli # Upgrade boto3 and awscli
+      - pip install --upgrade --force-reinstall boto3 awscli # Upgrade boto3 and awscli
       - pip install -r $CODEBUILD_SRC_DIR/model/requirements.txt
       - pip install crhelper -t $CODEBUILD_SRC_DIR/custom_resource # Install custom resource helper into the CFN directory
 
@@ -22,7 +22,27 @@ phases:
       - echo Build started on `date`
       - echo Run the workflow script
       - cd $CODEBUILD_SRC_DIR
-      - python model/run.py --git-branch=$GIT_BRANCH --codebuild-id=$CODEBUILD_BUILD_ID --pipeline-name=$PIPELINE_NAME --model-name=$MODEL_NAME --deploy-role=$DEPLOY_ROLE_ARN --sagemaker-role=$SAGEMAKER_ROLE_ARN --sagemaker-bucket=$SAGEMAKER_BUCKET --data-dir=$CODEBUILD_SRC_DIR_DataSourceOutput --output-dir=$CODEBUILD_SRC_DIR/assets --kms-key-id=$KMS_KEY_ID --workflow-role-arn=$WORKFLOW_ROLE_ARN --notification-arn=$NOTIFICATION_ARN # --ecr-dir=$CODEBUILD_SRC_DIR_EcrSourceOutput
+      - export PYTHONUNBUFFERED=TRUE
+      - export SAGEMAKER_PROJECT_NAME_ID="${SAGEMAKER_PROJECT_NAME}-${SAGEMAKER_PROJECT_ID}"
+      - export PREFIXED_PIPELINE_NAME="${PREFIX}-${PIPELINE_NAME}"
+      - export PREFIXED_MODEL_NAME="${PREFIX}-${MODEL_NAME}"
+      - | # TODO: split pipeline def from exec
+        python model/run_pipeline.py \
+        --role-arn=$SAGEMAKER_ROLE_ARN \
+        --tags "[{\"Key\":\"sagemaker:project-name\", \"Value\":\"${SAGEMAKER_PROJECT_NAME}\"}, {\"Key\":\"sagemaker:project-id\", \"Value\":\"${SAGEMAKER_PROJECT_ID}\"}]" \
+        --git-branch=$GIT_BRANCH \
+        --codebuild-id=$CODEBUILD_BUILD_ID \
+        --pipeline-name=$PIPELINE_NAME \
+        --model-name=$PREFIXED_MODEL_NAME \
+        --deploy-role=$DEPLOY_ROLE_ARN \
+        --sagemaker-role=$SAGEMAKER_ROLE_ARN \
+        --sagemaker-bucket=$SAGEMAKER_BUCKET \
+        --data-dir=$CODEBUILD_SRC_DIR_DataSourceOutput \
+        --output-dir=$CODEBUILD_SRC_DIR/assets \
+        --kms-key-id=$KMS_KEY_ID \
+        --workflow-role-arn=$WORKFLOW_ROLE_ARN \
+        --notification-arn=$NOTIFICATION_ARN \
+        --sagemaker-project-id=$SAGEMAKER_PROJECT_ID
       - echo Set unique commit in api to ensure re-deploy
       - echo $CODEBUILD_RESOLVED_SOURCE_VERSION > api/commit.txt
       - echo $CODEBUILD_BUILD_ID >> api/commit.txt # Add build ID when commit doesn't change
