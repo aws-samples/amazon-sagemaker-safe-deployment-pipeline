@@ -155,6 +155,7 @@ Resources:
             - "s3:*"
             Resource:
               - !Sub "arn:aws:s3:::${ProjectPrefix}-*"
+              - !Sub "arn:aws:s3:::${PipelineBucket}*"
           - Effect: Allow
             Action:
             - "events:PutRule"
