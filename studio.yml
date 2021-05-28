@@ -161,6 +161,8 @@ Resources:
             - "events:PutRule"
             - "events:DescribeRule"
             - "events:PutTargets"
+            - "events:RemoveTargets"
+            - "events:DeleteRule"
             Resource:
               - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${ProjectPrefix}-*"
               - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/SC-${AWS::AccountId}*"
