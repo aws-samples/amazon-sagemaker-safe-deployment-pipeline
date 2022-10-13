@@ -183,7 +183,7 @@ Resources:
       RepositoryDescription: !Sub SageMaker safe deployment pipeline for project ${SageMakerProjectName} with id ${SageMakerProjectId}, prefix ${ProjectPrefix} and model name ${ModelName}
       Code:
         S3:
-          Bucket: "S3_BUCKET_NAME"
+          Bucket: !Sub "${AWS::AccountId}-pipelineyaml-bucket"
           Key: "project.zip"
         BranchName: !Ref GitBranch
 

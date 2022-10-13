@@ -23,7 +23,7 @@ Resources:
   Model:
     Type: "AWS::SageMaker::Model"
     Properties:
-      ModelName: !Sub ${ModelName}-dev-${TrainJobId}
+      ModelName: !Sub ${ModelName}-dev
       PrimaryContainer:
         Image: !Ref ImageRepoUri
         ModelDataUrl: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/${ModelName}-${TrainJobId}/output/model.tar.gz
@@ -38,11 +38,11 @@ Resources:
           InstanceType: ml.t2.medium
           ModelName: !GetAtt Model.ModelName
           VariantName: !Sub ${ModelVariant}-${ModelName}
-      EndpointConfigName: !Sub ${ModelName}-dec-${TrainJobId}
+      EndpointConfigName: !Sub ${ModelName}-dec
       KmsKeyId: !Ref KmsKeyId
 
   Endpoint:
     Type: "AWS::SageMaker::Endpoint"
     Properties:
-      EndpointName: !Sub ${ModelName}-dev-${TrainJobId}
+      EndpointName: !Sub ${ModelName}-dev
       EndpointConfigName: !GetAtt EndpointConfig.EndpointConfigName
