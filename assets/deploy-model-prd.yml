@@ -1,5 +1,6 @@
 Transform: AWS::Serverless-2016-10-31
-Description: Deploy the production Amazon SageMaker Endpoint with Autoscaling, Model Monitoring Schedule and API Gateway Lambda.
+Description: Deploy the production Amazon SageMaker Endpoint with Autoscaling, Model 
+  Monitoring Schedule and API Gateway Lambda.
 Parameters:
   ImageRepoUri:
     Type: String
@@ -23,7 +24,8 @@ Parameters:
     Type: Number
     Description: The metric alarm threshold
   KmsKeyId:
-    Description: AWS KMS key ID used to encrypt data at rest on the ML storage volume attached to endpoint config and S3 data capture.
+    Description: AWS KMS key ID used to encrypt data at rest on the ML storage volume 
+      attached to endpoint config and S3 data capture.
     Type: String
   NotificationArn:
     Description: The arn for notification topic
@@ -81,7 +83,7 @@ Resources:
   Model:
     Type: "AWS::SageMaker::Model"
     Properties:
-      ModelName: !Sub ${ModelName}-prd-${TrainJobId}
+      ModelName: !Sub ${ModelName}-prd
       PrimaryContainer:
         Image: !Ref ImageRepoUri
         ModelDataUrl: !Sub s3://sagemaker-${AWS::Region}-${AWS::AccountId}/${ModelName}/${ModelName}-${TrainJobId}/output/model.tar.gz
@@ -109,13 +111,13 @@ Resources:
         EnableCapture: True
         InitialSamplingPercentage: 100
         KmsKeyId: !Ref KmsKeyId
-      EndpointConfigName: !Sub ${ModelName}-pec-${TrainJobId}
+      EndpointConfigName: !Sub ${ModelName}-pec
       KmsKeyId: !Ref KmsKeyId
 
   Endpoint:
     Type: "AWS::SageMaker::Endpoint"
     Properties:
-      EndpointName: !Sub ${ModelName}-prd-${TrainJobId}
+      EndpointName: !Sub ${ModelName}-prd
       EndpointConfigName: !GetAtt EndpointConfig.EndpointConfigName
 
   ApiFunction:
@@ -189,7 +191,7 @@ Resources:
   PreTrafficLambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "CodeDeployHook_mlops-${ModelName}-PreTrafficLambdaFunction"
+      FunctionName: !Sub "${ModelName}-PreTrafficLambdaFunction"
       CodeUri: ../api
       Handler: pre_traffic_hook.lambda_handler
       Runtime: python3.7
@@ -221,7 +223,7 @@ Resources:
   PostTrafficLambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "CodeDeployHook_mlops-${ModelName}-PostTrafficLambdaFunction"
+      FunctionName: !Sub "${ModelName}-PostTrafficLambdaFunction"
       CodeUri: ../api
       Handler: post_traffic_hook.lambda_handler
       Runtime: python3.7
@@ -351,7 +353,7 @@ Resources:
     Properties:
       MaxCapacity: 10
       MinCapacity: 2
-      ResourceId: !Sub endpoint/${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
+      ResourceId: !Sub endpoint/${ModelName}-prd/variant/${ModelVariant}-${ModelName}
       RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
@@ -362,7 +364,7 @@ Resources:
     Properties:
       PolicyName: SageMakerVariantInvocationsPerInstance
       PolicyType: TargetTrackingScaling
-      ResourceId: !Sub endpoint/${ModelName}-prd-${TrainJobId}/variant/${ModelVariant}-${ModelName}
+      ResourceId: !Sub endpoint/${ModelName}-prd/variant/${ModelVariant}-${ModelName}
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
       TargetTrackingScalingPolicyConfiguration:
